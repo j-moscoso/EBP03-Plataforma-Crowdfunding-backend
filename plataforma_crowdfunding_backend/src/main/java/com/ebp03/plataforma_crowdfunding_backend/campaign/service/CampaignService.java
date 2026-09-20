@@ -244,6 +244,16 @@ public class CampaignService {
         return campaignDetail(campaign);
     }
 
+    @Transactional(readOnly = true)
+    public ProgressResponse getProgress(UUID campaignId) {
+        closeExpiredCampaigns();
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
+        CampaignProgress progress = progress(campaign);
+        return new ProgressResponse(campaign.getGoalAmount(), progress.raisedAmount(), progress.remainingAmount(),
+                progress.percentage(), progress.sponsorsCount(), progress.secondsRemaining(), campaign.getStatus());
+    }
+
     @Transactional
     public CampaignUpdateResponse createCampaignUpdate(User creator, UUID campaignId, CampaignUpdateRequest request) {
         requireCreator(creator);
@@ -538,6 +548,10 @@ public class CampaignService {
                                   Integer percentage,
                                   Long sponsorsCount,
                                   Long secondsRemaining) { }
+
+    public record ProgressResponse(BigDecimal goalAmount, BigDecimal raisedAmount, BigDecimal remainingAmount,
+                                   Integer percentage, Long sponsorsCount, Long secondsRemaining,
+                                   CampaignStatus status) { }
 
     public record CampaignSummaryResponse(UUID id,
                                          String title,

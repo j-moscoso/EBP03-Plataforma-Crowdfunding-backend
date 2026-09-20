@@ -25,6 +25,10 @@ public class Contribution {
     @JoinColumn(name = "campaign_id", nullable = false)
     private Campaign campaign;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reward_id")
+    private CampaignReward reward;
+
     @Column(name = "sponsor_id", nullable = false)
     private UUID sponsorId;
 
@@ -38,6 +42,12 @@ public class Contribution {
     @Column(nullable = false, length = 20)
     private ContributionStatus status;
 
+    @Column(name = "confirmed_at")
+    private Instant confirmedAt;
+
+    @Column(name = "idempotency_key", nullable = false, length = 128)
+    private String idempotencyKey;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -48,12 +58,19 @@ public class Contribution {
     }
 
     public Contribution(Campaign campaign, UUID sponsorId, BigDecimal amount, String currency, ContributionStatus status) {
+        this(campaign, sponsorId, null, amount, currency, status, UUID.randomUUID().toString());
+    }
+
+    public Contribution(Campaign campaign, UUID sponsorId, CampaignReward reward, BigDecimal amount,
+                        String currency, ContributionStatus status, String idempotencyKey) {
         this.id = UUID.randomUUID();
         this.campaign = campaign;
         this.sponsorId = sponsorId;
+        this.reward = reward;
         this.amount = amount;
         this.currency = currency;
         this.status = status;
+        this.idempotencyKey = idempotencyKey;
     }
 
     @PrePersist
@@ -71,12 +88,16 @@ public class Contribution {
     public UUID getId() { return id; }
     public Campaign getCampaign() { return campaign; }
     public UUID getSponsorId() { return sponsorId; }
+    public CampaignReward getReward() { return reward; }
     public BigDecimal getAmount() { return amount; }
     public String getCurrency() { return currency; }
     public ContributionStatus getStatus() { return status; }
+    public Instant getConfirmedAt() { return confirmedAt; }
+    public String getIdempotencyKey() { return idempotencyKey; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
     public void setCampaign(Campaign campaign) { this.campaign = campaign; }
     public void setStatus(ContributionStatus status) { this.status = status; }
+    public void setConfirmedAt(Instant confirmedAt) { this.confirmedAt = confirmedAt; }
 }

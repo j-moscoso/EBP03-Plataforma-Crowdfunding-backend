@@ -13,8 +13,13 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignReward;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Payment;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.PaymentEvent;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.PaymentStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.PaymentEventRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.PaymentRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -32,13 +37,15 @@ public class SampleDataSeeder {
     @Bean
     CommandLineRunner sampleData(UserRepository users, SocialAccountRepository socialAccounts,
                                  PasswordEncoder encoder, SessionService sessions,
-                                 CampaignRepository campaigns, ContributionRepository contributions) {
-        return args -> seed(users, socialAccounts, encoder, sessions, campaigns, contributions);
+                                 CampaignRepository campaigns, ContributionRepository contributions,
+                                 PaymentRepository payments, PaymentEventRepository paymentEvents) {
+        return args -> seed(users, socialAccounts, encoder, sessions, campaigns, contributions, payments, paymentEvents);
     }
 
     @Transactional
     void seed(UserRepository users, SocialAccountRepository socialAccounts, PasswordEncoder encoder,
-              SessionService sessions, CampaignRepository campaigns, ContributionRepository contributions) {
+              SessionService sessions, CampaignRepository campaigns, ContributionRepository contributions,
+              PaymentRepository payments, PaymentEventRepository paymentEvents) {
         String creatorPassword = required("SEED_CREATOR_PASSWORD");
         String sponsorPassword = required("SEED_SPONSOR_PASSWORD");
 
@@ -71,7 +78,7 @@ public class SampleDataSeeder {
                     CampaignStatus.ACTIVE));
             createdCampaign.setRewards(List.of(
                     new CampaignReward(createdCampaign, "Agradecimiento", "Reconocimiento digital", new BigDecimal("10.00"), null, 0),
-                    new CampaignReward(createdCampaign, "Kit verde", "Kit de apoyo del proyecto", new BigDecimal("50.00"), null, 0),
+                    new CampaignReward(createdCampaign, "Kit verde", "Kit de apoyo del proyecto", new BigDecimal("50.00"), 100, 0),
                     new CampaignReward(createdCampaign, "Membresía especial", "Acceso exclusivo", new BigDecimal("150.00"), null, 0)
             ));
             campaignToSeed = campaigns.save(createdCampaign);
@@ -80,9 +87,19 @@ public class SampleDataSeeder {
         final UUID seedCampaignId = campaignToSeed.getId();
         boolean alreadyRaised = contributions.findAll().stream().anyMatch(item -> item.getCampaign().getId().equals(seedCampaignId) && item.getStatus() == ContributionStatus.CONFIRMED);
         if (!alreadyRaised) {
-            contributions.save(new Contribution(campaignToSeed, sponsor.getId(), new BigDecimal("13500.00"), "USD", ContributionStatus.CONFIRMED));
-            contributions.save(new Contribution(campaignToSeed, sponsor.getId(), new BigDecimal("2500.00"), "USD", ContributionStatus.PENDING));
-            contributions.save(new Contribution(campaignToSeed, UUID.randomUUID(), new BigDecimal("1200.00"), "USD", ContributionStatus.FAILED));
+                CampaignReward reward = campaignToSeed.getRewards().stream().filter(item -> item.getMinimumAmount().compareTo(new BigDecimal("50.00")) == 0).findFirst().orElse(null);
+                Contribution confirmed = contributions.save(new Contribution(campaignToSeed, sponsor.getId(), reward, new BigDecimal("75.00"), "USD", ContributionStatus.CONFIRMED, "seed-confirmed-75"));
+                confirmed.setConfirmedAt(Instant.now());
+                if (reward != null) reward.setClaimedQuantity(1);
+                Payment succeeded = payments.save(new Payment(confirmed, "simulated", confirmed.getAmount(), new BigDecimal("3.75")));
+                succeeded.setStatus(PaymentStatus.SUCCEEDED);
+                succeeded.setProviderPaymentId("seed-payment-success");
+                Payment failedPayment = payments.save(new Payment(
+                    contributions.save(new Contribution(campaignToSeed, sponsor.getId(), null, new BigDecimal("25.00"), "USD", ContributionStatus.FAILED, "seed-failed-25")),
+                    "simulated", new BigDecimal("25.00"), new BigDecimal("1.25")));
+                failedPayment.setStatus(PaymentStatus.FAILED);
+                failedPayment.setFailure("SIMULATED_FAILURE", "Payment provider failure");
+                paymentEvents.save(new PaymentEvent(succeeded, "seed-webhook-success", "payment.succeeded", "seed-payload-hash"));
         }
 
         SessionService.IssuedSession current = sessions.create(sponsor, false, "seed", "127.0.0.1");

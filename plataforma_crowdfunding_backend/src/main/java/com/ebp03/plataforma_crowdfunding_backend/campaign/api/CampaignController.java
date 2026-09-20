@@ -76,6 +76,11 @@ public class CampaignController {
         return ResponseEntity.ok(campaignService.getCampaign(campaignId));
     }
 
+    @GetMapping("/campaigns/{campaignId}/progress")
+    public ResponseEntity<CampaignService.ProgressResponse> getProgress(@PathVariable UUID campaignId) {
+        return ResponseEntity.ok(campaignService.getProgress(campaignId));
+    }
+
     @PostMapping("/campaigns/{campaignId}/updates")
     public ResponseEntity<CampaignService.CampaignUpdateResponse> createUpdate(@AuthenticationPrincipal User creator,
                                                                              @PathVariable UUID campaignId,

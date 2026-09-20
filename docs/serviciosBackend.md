@@ -472,9 +472,10 @@ Cuando se habilita, crea lo siguiente:
     - `Kit verde` mínimo `50.00`
     - `Membresía especial` mínimo `150.00`
 - Contribuciones de ejemplo:
-  - `13500.00` confirmada
-  - `2500.00` pendiente
-  - `1200.00` fallida
+  - `75.00 USD` confirmada, con recompensa `Kit verde` y pago `SUCCEEDED`
+  - `25.00 USD` fallida, con `failureCode = SIMULATED_FAILURE`; no impacta progreso
+- Evento `seed-webhook-success` procesado para el pago confirmado. Reenviarlo no crea otro evento por la restricción única `provider_event_id`.
+- Simulación disponible con `paymentMethodId = sim_success` y `paymentMethodId = sim_failure`.
 - Sesiones de ejemplo:
   - una sesión viva para el sponsor
   - una sesión revocada para el creator
@@ -491,4 +492,118 @@ Desde `plataforma_crowdfunding_backend`:
 .\mvnw.cmd spring-boot:run
 ```
 
-La migración `V1__create_auth_tables.sql` y `V2__campaign_tables.sql` se ejecutan al arrancar. Para PostgreSQL se configura `SUPABASE_DB_URL` (o una URL JDBC equivalente); para producción usar `AUTH_COOKIE_SECURE=true` y HTTPS. Durante la validación del proyecto se confirmó que la suite ejecuta correctamente con `Tests run: 12, Failures: 0, Errors: 0, Skipped: 0`.
+Las migraciones `V1__create_auth_tables.sql`, `V2__campaign_tables.sql` y `V3__contribution_payments.sql` se ejecutan al arrancar. Para PostgreSQL se configura `SUPABASE_DB_URL` (o una URL JDBC equivalente); para producción usar `AUTH_COOKIE_SECURE=true`, HTTPS, `PAYMENT_PLATFORM_FEE_RATE` y un `PAYMENT_WEBHOOK_SECRET` real. Durante la validación del proyecto se confirmó que la suite ejecuta correctamente con `Tests run: 14, Failures: 0, Errors: 0, Skipped: 0`.
+
+## Aportes, pagos y progreso
+
+Los aportes requieren sesión `AUTH_SESSION` de un usuario con rol `sponsor`. El backend nunca recibe ni guarda número de tarjeta, CVV o vencimiento: `paymentMethodId` es un identificador opaco que se envía al proveedor configurado. En desarrollo, el proveedor simulado acepta `sim_success`/`success` o `sim_failure`/`failure`.
+
+### 1) Crear un aporte
+
+`POST /api/campaigns/{campaignId}/contributions`
+
+Headers:
+
+```text
+Cookie: AUTH_SESSION=<sesion-del-sponsor>
+Idempotency-Key: aporte-2026-0001
+Content-Type: application/json
+```
+
+Body:
+
+```json
+{
+  "amount": 75.00,
+  "currency": "USD",
+  "rewardId": "UUID-de-Kit-verde",
+  "paymentMethodId": "sim_success"
+}
+```
+
+El servidor verifica campaña activa y no vencida, monto positivo, moneda de tres letras, pertenencia de la recompensa, mínimo, inventario y rol. La misma clave para el mismo sponsor devuelve el mismo aporte y pago. Un fallo responde con el estado `FAILED`, mensaje genérico y permite reintento; el código técnico queda solo en `payments.failure_code`.
+
+Respuesta `201`:
+
+```json
+{
+  "contribution": {
+    "id": "UUID",
+    "campaignId": "UUID",
+    "sponsorId": "UUID",
+    "rewardId": "UUID",
+    "amount": 75.00,
+    "currency": "USD",
+    "status": "CONFIRMED"
+  },
+  "id": "UUID",
+  "campaignId": "UUID",
+  "sponsorId": "UUID",
+  "rewardId": "UUID",
+  "amount": 75.00,
+  "currency": "USD",
+  "status": "CONFIRMED",
+  "payment": { "id": "UUID", "status": "SUCCEEDED" },
+  "createdAt": "2026-09-20T12:00:00Z"
+}
+```
+
+### 2) Aportes propios
+
+`GET /api/contributions/me?page=0&pageSize=10&status=CONFIRMED`
+
+Requiere sponsor. `status` es opcional (`PENDING`, `CONFIRMED`, `FAILED`, `REFUNDED`). Responde `content`, `page`, `pageSize`, `totalElements` y `totalPages`; solo incluye aportes del usuario autenticado y no incluye datos de pago sensibles.
+
+### 3) Detalle de aporte
+
+`GET /api/contributions/{contributionId}`
+
+Lo puede consultar el sponsor propietario o el creator propietario de la campaña. Devuelve el mismo detalle seguro del aporte, sin método de pago, tarjeta, CVV, tokens ni mensajes del proveedor.
+
+### 4) Reintentar pago
+
+`POST /api/contributions/{contributionId}/retry`
+
+Headers: `Idempotency-Key` nuevo y cookie del sponsor propietario.
+
+Body:
+
+```json
+{ "paymentMethodId": "sim_success" }
+```
+
+El reintento crea un nuevo registro `payments` asociado al mismo aporte. Si el aporte ya está confirmado, devuelve el pago confirmado y no crea un cobro adicional.
+
+### 5) Webhook del proveedor
+
+`POST /api/payments/webhook?paymentId={paymentId}&eventType=payment.succeeded&status=succeeded`
+
+Headers: `X-Provider-Event-Id` único y `X-Payment-Signature`, calculada en desarrollo como SHA-256 de `PAYMENT_WEBHOOK_SECRET + payload` en hexadecimal. El cuerpo es el payload crudo del proveedor. Se valida la firma, se guarda `providerEventId` y se procesa el cambio una sola vez. La confirmación actualiza `payment`, `contribution`, `claimedQuantity` y progreso dentro de una transacción. Firma inválida responde `401` y no persiste el evento.
+
+### 6) Progreso público
+
+`GET /api/campaigns/{campaignId}/progress`
+
+No requiere sesión para campañas públicas. Respuesta:
+
+```json
+{
+  "goalAmount": 30000.00,
+  "raisedAmount": 75.00,
+  "remainingAmount": 29925.00,
+  "percentage": 0,
+  "sponsorsCount": 1,
+  "secondsRemaining": 1234567,
+  "status": "ACTIVE"
+}
+```
+
+Solo los aportes `CONFIRMED` incrementan `raisedAmount`, porcentaje, sponsors e inventario reclamado. La comisión se calcula con `PAYMENT_PLATFORM_FEE_RATE` (por defecto `0.05`) y no se fija en el frontend.
+
+### Errores y reglas de seguridad
+
+- Sin sesión: `401`; creator intentando aportar o sponsor accediendo a otro aporte: `403`.
+- Monto cero/negativo, moneda inválida, reward de otra campaña o mínimo incumplido: `400`.
+- Campaña inactiva o vencida: `409` con código `CAMPAIGN_NOT_ACTIVE`.
+- No se aceptan tarjetas, CVV ni fechas de vencimiento en ningún body.
+- Una intención `PENDING` o una respuesta de pago no definitiva no cambia el progreso.

@@ -12,12 +12,15 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.VerificationStatus;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignReward;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -132,7 +135,7 @@ class CampaignControllerIntegrationTests {
         Campaign campaign = campaignRepository.findById(UUID.fromString(campaignId)).orElseThrow();
         contributionRepository.save(new Contribution(campaign, sponsor.getId(), new BigDecimal("13500.00"), "USD", ContributionStatus.CONFIRMED));
         contributionRepository.save(new Contribution(campaign, sponsor.getId(), new BigDecimal("600.00"), "USD", ContributionStatus.PENDING));
-        contributionRepository.save(new Contribution(campaign, UUID.randomUUID(), new BigDecimal("1200.00"), "USD", ContributionStatus.FAILED));
+        contributionRepository.save(new Contribution(campaign, sponsor.getId(), new BigDecimal("1200.00"), "USD", ContributionStatus.FAILED));
 
         mockMvc.perform(get("/api/campaigns/{campaignId}", campaignId))
                 .andExpect(status().isOk())
@@ -150,6 +153,52 @@ class CampaignControllerIntegrationTests {
                                 .andExpect(jsonPath("$.message").value("El parámetro campaignId debe ser un UUID válido."));
         }
 
+        @Test
+        void contributionIsIdempotentAndFailedPaymentCanBeRetried() throws Exception {
+                User creator = userRepository.save(new User("Campaign creator", "creator.contribution@test.local", "hashed", UserRole.CREATOR, VerificationStatus.VERIFIED, com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus.ACTIVE));
+                Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Aporte test", "Campaña de prueba", new BigDecimal("1000.00"), Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                CampaignReward reward = new CampaignReward(campaign, "Kit", "Kit de prueba", new BigDecimal("50.00"), 1, 0);
+                campaign.setRewards(java.util.List.of(reward));
+                campaignRepository.save(campaign);
+                Cookie sponsor = registerSponsor("sponsor.contribution@test.local");
+
+                MvcResult confirmed = mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaign.getId())
+                                .cookie(sponsor).header("Idempotency-Key", "contribution-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"amount\":75,\"currency\":\"USD\",\"rewardId\":\"" + reward.getId() + "\",\"paymentMethodId\":\"sim_success\"}"))
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                        .andExpect(jsonPath("$.payment.status").value("SUCCEEDED"))
+                        .andReturn();
+                String contributionId = extractId(confirmed.getResponse().getContentAsString());
+
+                mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaign.getId())
+                                .cookie(sponsor).header("Idempotency-Key", "contribution-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"amount\":75,\"currency\":\"USD\",\"rewardId\":\"" + reward.getId() + "\",\"paymentMethodId\":\"sim_success\"}"))
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.id").value(contributionId));
+
+                MvcResult failed = mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaign.getId())
+                                .cookie(sponsor).header("Idempotency-Key", "contribution-key-2")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"amount\":25,\"currency\":\"USD\",\"paymentMethodId\":\"sim_failure\"}"))
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("FAILED"))
+                        .andReturn();
+                String failedId = extractId(failed.getResponse().getContentAsString());
+                mockMvc.perform(post("/api/contributions/{contributionId}/retry", failedId)
+                                .cookie(sponsor).header("Idempotency-Key", "retry-key-1")
+                                .contentType(MediaType.APPLICATION_JSON).content("{\"paymentMethodId\":\"sim_success\"}"))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+
+                mockMvc.perform(get("/api/campaigns/{campaignId}/progress", campaign.getId()))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.raisedAmount").value(100.0))
+                        .andExpect(jsonPath("$.sponsorsCount").value(1));
+        }
+
     private Cookie registerCreator(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,6 +211,15 @@ class CampaignControllerIntegrationTests {
         userRepository.save(creator);
         return result.getResponse().getCookie("AUTH_SESSION");
     }
+
+        private Cookie registerSponsor(String email) throws Exception {
+                MvcResult result = mockMvc.perform(post("/api/auth/register")
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content("{\"name\":\"Sponsor\",\"email\":\"" + email + "\",\"password\":\"Secure1!\",\"role\":\"sponsor\"}"))
+                                .andExpect(status().isCreated())
+                                .andReturn();
+                return result.getResponse().getCookie("AUTH_SESSION");
+        }
 
     private String extractId(String json) {
         int index = json.indexOf("\"id\":\"");

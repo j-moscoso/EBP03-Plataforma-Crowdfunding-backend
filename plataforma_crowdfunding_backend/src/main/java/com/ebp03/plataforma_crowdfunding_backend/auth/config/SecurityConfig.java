@@ -34,6 +34,7 @@ public class SecurityConfig {
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/social", "/api/auth/logout").permitAll()
+                        .requestMatchers("/api/payments/webhook").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/campaigns", "/api/campaigns/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(sessionAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
