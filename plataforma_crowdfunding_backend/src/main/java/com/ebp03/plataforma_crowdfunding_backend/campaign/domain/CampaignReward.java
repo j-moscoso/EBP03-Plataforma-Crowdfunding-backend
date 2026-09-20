@@ -84,4 +84,5 @@ public class CampaignReward {
     public Instant getUpdatedAt() { return updatedAt; }
 
     public void setCampaign(Campaign campaign) { this.campaign = campaign; }
+    public void setClaimedQuantity(Integer claimedQuantity) { this.claimedQuantity = claimedQuantity; }
 }

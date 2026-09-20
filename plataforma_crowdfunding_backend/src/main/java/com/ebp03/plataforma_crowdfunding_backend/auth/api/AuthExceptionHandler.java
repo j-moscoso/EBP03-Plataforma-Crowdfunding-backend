@@ -14,6 +14,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class AuthExceptionHandler {
@@ -64,5 +65,12 @@ public class AuthExceptionHandler {
         List<String> details = exception.getBindingResult().getFieldErrors().stream()
                 .map(error -> error.getField() + ": " + error.getDefaultMessage()).toList();
         return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "La solicitud no es válida.", details));
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    ResponseEntity<ApiError> statusError(ResponseStatusException exception) {
+        String reason = exception.getReason() == null ? "La solicitud no es válida." : exception.getReason();
+        String code = reason.matches("[A-Z][A-Z0-9_]+") ? reason : "REQUEST_ERROR";
+        return ResponseEntity.status(exception.getStatusCode()).body(new ApiError(code, code.equals("REQUEST_ERROR") ? reason : "La operación no pudo completarse."));
     }
 }
