@@ -29,6 +29,14 @@ Nunca se devuelven `passwordHash`, `tokenHash`, contraseñas, tokens completos, 
 
 ## Endpoints de autenticación
 
+### Flujo de prueba con sesión
+
+Los endpoints protegidos no funcionan abriendo la URL sin más en el navegador. Primero hay que ejecutar `POST /api/auth/register` o `POST /api/auth/login`; la respuesta establece la cookie HttpOnly `AUTH_SESSION`. Después, el mismo cliente HTTP debe enviar esa cookie al llamar `GET /api/auth/me` o cualquier endpoint protegido.
+
+Si se abre `GET /api/auth/me` sin haber iniciado sesión, la respuesta esperada es `401 Unauthorized`. Esto es intencional: el endpoint no debe devolver el perfil de otro usuario ni crear una sesión implícita.
+
+En las rutas con `{draftId}` o `{campaignId}`, las llaves indican un marcador de documentación. Deben reemplazarse por el UUID real devuelto al crear el borrador o publicar la campaña. Enviar literalmente `{campaignId}` responde `400 INVALID_PARAMETER`.
+
 ### 1) Registro
 
 `POST /api/auth/register`
@@ -264,8 +272,10 @@ Respuesta `200`:
       "updatedAt": "2026-01-01T00:00:00Z"
     }
   ],
-  "pageable": {},
-  "totalElements": 1
+  "page": 0,
+  "pageSize": 10,
+  "totalElements": 1,
+  "totalPages": 1
 }
 ```
 
@@ -386,7 +396,11 @@ Respuesta `200`:
         "secondsRemaining": 1234567
       }
     }
-  ]
+  ],
+  "page": 0,
+  "pageSize": 10,
+  "totalElements": 1,
+  "totalPages": 1
 }
 ```
 

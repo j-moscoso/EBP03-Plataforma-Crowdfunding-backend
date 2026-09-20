@@ -95,10 +95,10 @@ public class CampaignService {
     }
 
     @Transactional(readOnly = true)
-    public Page<DraftResponse> listDrafts(User creator, int page, int pageSize) {
+    public PageResponse<DraftResponse> listDrafts(User creator, int page, int pageSize) {
         requireCreator(creator);
         Pageable pageable = PageRequest.of(page, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt"));
-        return campaignDraftRepository.findByCreatorId(creator.getId(), pageable).map(DraftResponse::from);
+        return PageResponse.from(campaignDraftRepository.findByCreatorId(creator.getId(), pageable).map(DraftResponse::from), page, pageSize);
     }
 
     @Transactional(readOnly = true)
@@ -204,7 +204,7 @@ public class CampaignService {
     }
 
     @Transactional(readOnly = true)
-    public Page<CampaignSummaryResponse> listCampaigns(Integer page, Integer pageSize, String category, String status) {
+    public PageResponse<CampaignSummaryResponse> listCampaigns(Integer page, Integer pageSize, String category, String status) {
         int safePage = Math.max(0, Objects.requireNonNullElse(page, 0));
         int safeSize = Math.max(1, Math.min(50, Objects.requireNonNullElse(pageSize, 10)));
         Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "publishedAt"));
@@ -217,7 +217,7 @@ public class CampaignService {
                 campaignStatus = CampaignStatus.valueOf(status.trim().toUpperCase());
             } catch (IllegalArgumentException ignored) {
                 campaigns = campaignRepository.findAll(pageable);
-                return campaigns.map(this::campaignSummary);
+                return PageResponse.from(campaigns.map(this::campaignSummary), safePage, safeSize);
             }
         }
 
@@ -233,7 +233,7 @@ public class CampaignService {
         } else {
             campaigns = campaignRepository.findAll(pageable);
         }
-        return campaigns.map(this::campaignSummary);
+        return PageResponse.from(campaigns.map(this::campaignSummary), safePage, safeSize);
     }
 
     @Transactional(readOnly = true)
@@ -486,6 +486,16 @@ public class CampaignService {
                                      String category,
                                      String mediaUrl,
                                      List<RewardRequest> rewards) { }
+
+    public record PageResponse<T>(List<T> content,
+                                  int page,
+                                  int pageSize,
+                                  long totalElements,
+                                  int totalPages) {
+        static <T> PageResponse<T> from(Page<T> result, int page, int pageSize) {
+            return new PageResponse<>(result.getContent(), page, pageSize, result.getTotalElements(), result.getTotalPages());
+        }
+    }
 
     public record CampaignUpdateRequest(String title, String body) { }
 

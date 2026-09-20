@@ -3,7 +3,6 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.api;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignService;
 import java.util.UUID;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,7 +31,7 @@ public class CampaignController {
     }
 
     @GetMapping("/drafts")
-    public ResponseEntity<Page<CampaignService.DraftResponse>> listDrafts(@AuthenticationPrincipal User creator,
+    public ResponseEntity<CampaignService.PageResponse<CampaignService.DraftResponse>> listDrafts(@AuthenticationPrincipal User creator,
                                                                           @RequestParam(defaultValue = "0") int page,
                                                                           @RequestParam(defaultValue = "10") int pageSize) {
         return ResponseEntity.ok(campaignService.listDrafts(creator, page, pageSize));
@@ -65,7 +64,7 @@ public class CampaignController {
     }
 
     @GetMapping("/campaigns")
-    public ResponseEntity<Page<CampaignService.CampaignSummaryResponse>> listCampaigns(@RequestParam(defaultValue = "0") Integer page,
+    public ResponseEntity<CampaignService.PageResponse<CampaignService.CampaignSummaryResponse>> listCampaigns(@RequestParam(defaultValue = "0") Integer page,
                                                                                    @RequestParam(defaultValue = "10") Integer pageSize,
                                                                                    @RequestParam(required = false) String category,
                                                                                    @RequestParam(required = false) String status) {

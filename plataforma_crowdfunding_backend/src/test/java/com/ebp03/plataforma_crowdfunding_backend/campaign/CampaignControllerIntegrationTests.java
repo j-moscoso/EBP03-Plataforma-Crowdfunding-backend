@@ -142,6 +142,14 @@ class CampaignControllerIntegrationTests {
                 .andExpect(jsonPath("$.progress.secondsRemaining").exists());
     }
 
+        @Test
+        void placeholderCampaignIdReturnsReadableValidationError() throws Exception {
+                mockMvc.perform(get("/api/campaigns/{campaignId}", "{campaignId}"))
+                                .andExpect(status().isBadRequest())
+                                .andExpect(jsonPath("$.code").value("INVALID_PARAMETER"))
+                                .andExpect(jsonPath("$.message").value("El parámetro campaignId debe ser un UUID válido."));
+        }
+
     private Cookie registerCreator(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
