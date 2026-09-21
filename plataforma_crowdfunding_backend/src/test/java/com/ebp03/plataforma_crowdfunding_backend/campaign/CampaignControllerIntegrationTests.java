@@ -145,6 +145,50 @@ class CampaignControllerIntegrationTests {
                 .andExpect(jsonPath("$.progress.secondsRemaining").exists());
     }
 
+    @Test
+    void pendingCreatorCanCreateAndPublishCampaign() throws Exception {
+        Cookie creator = registerCreator("creator.pending@test.local");
+
+        String draft = mockMvc.perform(post("/api/drafts")
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Proyecto pendiente\",\"description\":\"Campaña disponible para el MVP\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Educación\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(creator))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void sponsorCannotCreateOrPublishCampaign() throws Exception {
+        Cookie sponsor = registerSponsor("sponsor.campaign@test.local");
+        Cookie creator = registerCreator("creator.owner@test.local");
+        String draft = mockMvc.perform(post("/api/drafts")
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Proyecto\",\"description\":\"Descripción\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Arte\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/drafts")
+                        .cookie(sponsor)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"No permitido\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Arte\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(sponsor))
+                .andExpect(status().isForbidden());
+    }
+
+        @Test
+        void unauthenticatedUserCannotCreateCampaign() throws Exception {
+                mockMvc.perform(post("/api/drafts")
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content("{\"title\":\"No permitido\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Arte\"}"))
+                                .andExpect(status().isUnauthorized());
+        }
+
         @Test
         void placeholderCampaignIdReturnsReadableValidationError() throws Exception {
                 mockMvc.perform(get("/api/campaigns/{campaignId}", "{campaignId}"))
@@ -206,9 +250,6 @@ class CampaignControllerIntegrationTests {
                 .andExpect(status().isCreated())
                 .andReturn();
 
-        User creator = userRepository.findByEmail(email).orElseThrow();
-        creator.setVerificationStatus(VerificationStatus.VERIFIED);
-        userRepository.save(creator);
         return result.getResponse().getCookie("AUTH_SESSION");
     }
 

@@ -3,7 +3,7 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.service;
 import com.ebp03.plataforma_crowdfunding_backend.auth.api.PublicUser;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
-import com.ebp03.plataforma_crowdfunding_backend.auth.domain.VerificationStatus;
+import com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignDraft;
@@ -69,7 +69,7 @@ public class CampaignService {
 
     @Transactional
     public DraftResponse createDraft(User creator, DraftCreateRequest request) {
-        requireVerifiedCreator(creator);
+        requireActiveCreator(creator);
         List<FieldError> errors = validateDraftFields(request.goalAmount(), request.durationDays(), request.category(), request.rewards());
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
 
@@ -96,14 +96,14 @@ public class CampaignService {
 
     @Transactional(readOnly = true)
     public PageResponse<DraftResponse> listDrafts(User creator, int page, int pageSize) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         Pageable pageable = PageRequest.of(page, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt"));
         return PageResponse.from(campaignDraftRepository.findByCreatorId(creator.getId(), pageable).map(DraftResponse::from), page, pageSize);
     }
 
     @Transactional(readOnly = true)
     public DraftResponse getDraft(User creator, UUID draftId) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -114,7 +114,7 @@ public class CampaignService {
 
     @Transactional
     public DraftResponse updateDraft(User creator, UUID draftId, DraftUpdateRequest request) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -155,7 +155,7 @@ public class CampaignService {
 
     @Transactional
     public void deleteDraft(User creator, UUID draftId) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -166,7 +166,7 @@ public class CampaignService {
 
     @Transactional
     public CampaignDetailResponse publishDraft(User creator, UUID draftId) {
-        requireVerifiedCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -256,7 +256,7 @@ public class CampaignService {
 
     @Transactional
     public CampaignUpdateResponse createCampaignUpdate(User creator, UUID campaignId, CampaignUpdateRequest request) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
         if (!campaign.getCreatorId().equals(creator.getId())) {
@@ -287,16 +287,9 @@ public class CampaignService {
         }
     }
 
-    private void requireCreator(User user) {
-        if (user == null || user.getRole() != UserRole.CREATOR) {
+    private void requireActiveCreator(User user) {
+        if (user == null || user.getRole() != UserRole.CREATOR || user.getStatus() != AccountStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Solo los creadores pueden acceder a esta operación");
-        }
-    }
-
-    private void requireVerifiedCreator(User user) {
-        requireCreator(user);
-        if (user.getVerificationStatus() != VerificationStatus.VERIFIED) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "El creador debe estar verificado");
         }
     }
 
