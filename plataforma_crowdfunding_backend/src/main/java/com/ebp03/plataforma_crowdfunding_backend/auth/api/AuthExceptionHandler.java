@@ -71,6 +71,9 @@ public class AuthExceptionHandler {
     ResponseEntity<ApiError> statusError(ResponseStatusException exception) {
         String reason = exception.getReason() == null ? "La solicitud no es válida." : exception.getReason();
         String code = reason.matches("[A-Z][A-Z0-9_]+") ? reason : "REQUEST_ERROR";
-        return ResponseEntity.status(exception.getStatusCode()).body(new ApiError(code, code.equals("REQUEST_ERROR") ? reason : "La operación no pudo completarse."));
+        String message = "CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT".equals(code)
+            ? "El aporte supera el importe que todavía falta por recaudar."
+            : code.equals("REQUEST_ERROR") ? reason : "La operación no pudo completarse.";
+        return ResponseEntity.status(exception.getStatusCode()).body(new ApiError(code, message));
     }
 }

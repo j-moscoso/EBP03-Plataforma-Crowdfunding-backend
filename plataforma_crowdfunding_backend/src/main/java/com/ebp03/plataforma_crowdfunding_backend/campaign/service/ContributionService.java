@@ -37,14 +37,15 @@ public class ContributionService {
         this.events = events; this.paymentProvider = paymentProvider; this.feeRate = feeRate; this.webhookSecret = webhookSecret;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ContributionCapacityException.class)
     public ContributionResponse create(User sponsor, UUID campaignId, CreateRequest request, String idempotencyKey) {
         requireSponsor(sponsor);
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) bad("Idempotency-Key es obligatorio");
         var existing = contributions.findBySponsorIdAndIdempotencyKey(sponsor.getId(), idempotencyKey);
         if (existing.isPresent()) return response(existing.get());
-        Campaign campaign = activeCampaign(campaignId);
+        Campaign campaign = lockedActiveCampaign(campaignId);
         validateAmount(request.amount(), request.currency());
+        validateRemaining(campaign, request.amount());
         CampaignReward reward = findReward(campaign, request.rewardId());
         if (reward != null) {
             if (request.amount().compareTo(reward.getMinimumAmount()) < 0) bad("El monto no alcanza el mínimo de la recompensa");
@@ -60,13 +61,14 @@ public class ContributionService {
         return response(contribution);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ContributionCapacityException.class)
     public ContributionResponse retry(User sponsor, UUID contributionId, String paymentMethodId, String idempotencyKey) {
         requireSponsor(sponsor);
         if (idempotencyKey == null || idempotencyKey.isBlank()) bad("Idempotency-Key es obligatorio");
         Contribution contribution = ownedContribution(sponsor, contributionId);
         if (contribution.getStatus() == ContributionStatus.CONFIRMED) return response(contribution);
-        Campaign campaign = activeCampaign(contribution.getCampaign().getId());
+        Campaign campaign = lockedActiveCampaign(contribution.getCampaign().getId());
+        validateRemaining(campaign, contribution.getAmount());
         if (contribution.getReward() != null && contribution.getReward().getQuantity() != null
                 && contribution.getReward().getClaimedQuantity() >= contribution.getReward().getQuantity()) bad("La recompensa no está disponible");
         contribution.setStatus(ContributionStatus.PENDING);
@@ -96,7 +98,7 @@ public class ContributionService {
         return response(contribution);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ContributionCapacityException.class)
     public void webhook(String signature, String payload, String providerEventId, UUID paymentId, String eventType, String status) {
         if (!MessageDigest.isEqual(sign(payload).getBytes(StandardCharsets.UTF_8), (signature == null ? "" : signature).getBytes(StandardCharsets.UTF_8)))
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Firma inválida");
@@ -115,8 +117,17 @@ public class ContributionService {
 
     private void applyProviderResult(Contribution contribution, Payment payment, PaymentProvider.Result result) {
         if (result.successful()) {
-            payment.setStatus(PaymentStatus.SUCCEEDED); payment.setProviderPaymentId(result.providerPaymentId());
-            confirm(contribution);
+            try {
+                confirm(contribution);
+                payment.setStatus(PaymentStatus.SUCCEEDED); payment.setProviderPaymentId(result.providerPaymentId());
+            } catch (ContributionCapacityException exception) {
+                payment.setStatus(PaymentStatus.FAILED);
+                payment.setFailure(exception.getReason(), "El aporte ya no cabe en el restante de la campaña.");
+                contribution.setStatus(ContributionStatus.FAILED);
+                payments.save(payment);
+                contributions.save(contribution);
+                throw exception;
+            }
         } else {
             payment.setStatus(PaymentStatus.FAILED); payment.setFailure(result.failureCode(), "Payment provider failure");
             contribution.setStatus(ContributionStatus.FAILED);
@@ -126,6 +137,8 @@ public class ContributionService {
 
     private void confirm(Contribution contribution) {
         if (contribution.getStatus() == ContributionStatus.CONFIRMED) return;
+        Campaign campaign = lockedActiveCampaign(contribution.getCampaign().getId());
+        validateRemaining(campaign, contribution.getAmount());
         contribution.setStatus(ContributionStatus.CONFIRMED); contribution.setConfirmedAt(Instant.now());
         CampaignReward reward = contribution.getReward();
         if (reward != null) reward.setClaimedQuantity(reward.getClaimedQuantity() + 1);
@@ -136,6 +149,22 @@ public class ContributionService {
         if (campaign.getStatus() != CampaignStatus.ACTIVE || !campaign.getDeadline().isAfter(Instant.now()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_NOT_ACTIVE");
         return campaign;
+    }
+
+    private Campaign lockedActiveCampaign(UUID id) {
+        Campaign campaign = campaigns.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
+        if (campaign.getStatus() != CampaignStatus.ACTIVE || !campaign.getDeadline().isAfter(Instant.now()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_NOT_ACTIVE");
+        return campaign;
+    }
+
+    private void validateRemaining(Campaign campaign, BigDecimal amount) {
+        BigDecimal confirmed = contributions.sumAmountByCampaignIdAndStatus(campaign.getId(), ContributionStatus.CONFIRMED);
+        if (confirmed == null) confirmed = BigDecimal.ZERO;
+        BigDecimal remaining = campaign.getGoalAmount().subtract(confirmed).max(BigDecimal.ZERO);
+        if (amount.compareTo(remaining) > 0)
+            throw new ContributionCapacityException();
     }
     private CampaignReward findReward(Campaign campaign, UUID rewardId) {
         if (rewardId == null) return null;
@@ -159,4 +188,10 @@ public class ContributionService {
     public record ContributionResponse(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status, PaymentResponse payment, Instant createdAt, ContributionView contribution) { }
     public record ContributionView(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status) { }
     public record PageResponse(java.util.List<ContributionResponse> content, int page, int pageSize, long totalElements, int totalPages) { }
+
+    public static class ContributionCapacityException extends ResponseStatusException {
+        public ContributionCapacityException() {
+            super(HttpStatus.BAD_REQUEST, "CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT");
+        }
+    }
 }
