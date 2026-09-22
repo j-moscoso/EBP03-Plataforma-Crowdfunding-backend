@@ -8,6 +8,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CampaignRepository extends JpaRepository<Campaign, UUID> {
+    Page<Campaign> findByCreatorId(UUID creatorId, Pageable pageable);
+    Page<Campaign> findByCreatorIdAndStatus(UUID creatorId, CampaignStatus status, Pageable pageable);
     Page<Campaign> findByStatus(CampaignStatus status, Pageable pageable);
     Page<Campaign> findByCategoryIgnoreCase(String category, Pageable pageable);
     Page<Campaign> findByStatusAndCategoryIgnoreCase(CampaignStatus status, String category, Pageable pageable);

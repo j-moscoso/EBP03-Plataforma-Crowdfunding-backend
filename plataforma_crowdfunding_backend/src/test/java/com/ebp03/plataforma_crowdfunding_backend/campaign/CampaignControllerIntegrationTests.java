@@ -16,6 +16,9 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignReward;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignDraft;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.DraftReward;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignDraftRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import jakarta.servlet.http.Cookie;
@@ -44,6 +47,9 @@ class CampaignControllerIntegrationTests {
 
     @Autowired
     private CampaignRepository campaignRepository;
+
+        @Autowired
+        private CampaignDraftRepository campaignDraftRepository;
 
     @Autowired
     private ContributionRepository contributionRepository;
@@ -179,6 +185,66 @@ class CampaignControllerIntegrationTests {
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(sponsor))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void creatorOnlySeesOwnCampaignsAndPrivateEndpointRequiresCreator() throws Exception {
+        Cookie creatorA = registerCreator("creator.mine.a@test.local");
+        Cookie creatorB = registerCreator("creator.mine.b@test.local");
+        User userA = userRepository.findByEmail("creator.mine.a@test.local").orElseThrow();
+        User userB = userRepository.findByEmail("creator.mine.b@test.local").orElseThrow();
+        campaignRepository.save(new Campaign(userA.getId(), "Campaña A", "A", new BigDecimal("100.00"),
+                Instant.now().plusSeconds(3600), "Arte", null, CampaignStatus.ACTIVE));
+        campaignRepository.save(new Campaign(userB.getId(), "Campaña B", "B", new BigDecimal("100.00"),
+                Instant.now().plusSeconds(3600), "Arte", null, CampaignStatus.ACTIVE));
+
+        mockMvc.perform(get("/api/campaigns/mine").cookie(creatorA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("Campaña A"));
+        mockMvc.perform(get("/api/campaigns/mine").cookie(creatorB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("Campaña B"));
+        mockMvc.perform(get("/api/campaigns/mine")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/campaigns/mine").cookie(registerSponsor("sponsor.mine@test.local")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void rewardMinimumCannotExceedGoalOnCreateUpdateOrPublish() throws Exception {
+        Cookie creator = registerCreator("creator.reward-rule@test.local");
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"minimumAmount\":101}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"))
+                .andExpect(jsonPath("$.message").value("El monto mínimo de la recompensa no puede superar la meta de la campaña."));
+
+        String draftId = extractId(mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"minimumAmount\":50}]}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        mockMvc.perform(put("/api/drafts/{draftId}", draftId).cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":40}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
+        mockMvc.perform(get("/api/drafts/{draftId}", draftId).cookie(creator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.goalAmount").value(100.0));
+
+        User user = userRepository.findByEmail("creator.reward-rule@test.local").orElseThrow();
+        CampaignDraft invalidDraft = new CampaignDraft(user.getId(), "Invalido", "Prueba", new BigDecimal("50.00"),
+                30, "Arte", null);
+        invalidDraft.setRewards(java.util.List.of(new DraftReward(invalidDraft, "Kit", "", new BigDecimal("51.00"), 0)));
+        invalidDraft = campaignDraftRepository.save(invalidDraft);
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", invalidDraft.getId()).cookie(creator))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
+        mockMvc.perform(get("/api/drafts/{draftId}", invalidDraft.getId()).cookie(creator))
+                .andExpect(status().isOk());
     }
 
         @Test

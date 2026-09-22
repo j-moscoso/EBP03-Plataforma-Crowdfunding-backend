@@ -71,6 +71,15 @@ public class CampaignController {
         return ResponseEntity.ok(campaignService.listCampaigns(page, pageSize, category, status));
     }
 
+    @GetMapping("/campaigns/mine")
+    public ResponseEntity<CampaignService.PageResponse<CampaignService.CampaignSummaryResponse>> listMyCampaigns(
+            @AuthenticationPrincipal User creator,
+            @RequestParam(defaultValue = "0") Integer page,
+            @RequestParam(defaultValue = "10") Integer pageSize,
+            @RequestParam(required = false) String status) {
+        return ResponseEntity.ok(campaignService.listMyCampaigns(creator, page, pageSize, status));
+    }
+
     @GetMapping("/campaigns/{campaignId}")
     public ResponseEntity<CampaignService.CampaignDetailResponse> getCampaign(@PathVariable UUID campaignId) {
         return ResponseEntity.ok(campaignService.getCampaign(campaignId));

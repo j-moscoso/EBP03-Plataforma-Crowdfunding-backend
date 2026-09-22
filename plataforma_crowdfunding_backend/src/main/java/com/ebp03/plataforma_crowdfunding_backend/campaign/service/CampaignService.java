@@ -237,6 +237,26 @@ public class CampaignService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<CampaignSummaryResponse> listMyCampaigns(User creator, Integer page, Integer pageSize, String status) {
+        requireActiveCreator(creator);
+        int safePage = Math.max(0, Objects.requireNonNullElse(page, 0));
+        int safeSize = Math.max(1, Math.min(50, Objects.requireNonNullElse(pageSize, 10)));
+        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "publishedAt"));
+        Page<Campaign> campaigns;
+        if (status == null || status.isBlank()) {
+            campaigns = campaignRepository.findByCreatorId(creator.getId(), pageable);
+        } else {
+            try {
+                campaigns = campaignRepository.findByCreatorIdAndStatus(
+                        creator.getId(), CampaignStatus.valueOf(status.trim().toUpperCase()), pageable);
+            } catch (IllegalArgumentException exception) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado de campaña inválido");
+            }
+        }
+        return PageResponse.from(campaigns.map(this::campaignSummary), safePage, safeSize);
+    }
+
+    @Transactional(readOnly = true)
     public CampaignDetailResponse getCampaign(UUID campaignId) {
         closeExpiredCampaigns();
         Campaign campaign = campaignRepository.findById(campaignId)
@@ -427,7 +447,7 @@ public class CampaignService {
         List<FieldError> errors = new ArrayList<>();
         if (goalAmount == null) {
             errors.add(new FieldError("goalAmount", "REQUIRED"));
-        } else if (goalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+        } else if (!validMoney(goalAmount)) {
             errors.add(new FieldError("goalAmount", "INVALID"));
         }
 
@@ -446,15 +466,30 @@ public class CampaignService {
         if (rewards != null) {
             for (int index = 0; index < rewards.size(); index++) {
                 RewardRequest reward = rewards.get(index);
+                if (reward == null) {
+                    errors.add(new FieldError("rewards[" + index + "]", "INVALID"));
+                    continue;
+                }
                 if (reward.title() == null || reward.title().isBlank()) {
                     errors.add(new FieldError("rewards[" + index + "].title", "REQUIRED"));
                 }
-                if (reward.minimumAmount() == null || reward.minimumAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                if (!validMoney(reward.minimumAmount())) {
                     errors.add(new FieldError("rewards[" + index + "].minimumAmount", "INVALID"));
+                } else if (goalAmount != null && reward.minimumAmount().compareTo(goalAmount) > 0) {
+                    errors.add(new FieldError(
+                            "rewards[" + index + "].minimumAmount",
+                            "MINIMUM_AMOUNT_EXCEEDS_GOAL",
+                            "El monto mínimo de la recompensa no puede superar la meta de la campaña."));
                 }
             }
         }
         return errors;
+    }
+
+    private boolean validMoney(BigDecimal amount) {
+        return amount != null
+                && amount.compareTo(BigDecimal.ZERO) > 0
+                && amount.scale() <= 2;
     }
 
     private List<RewardRequest> convertRewards(List<DraftReward> rewards) {
@@ -579,7 +614,11 @@ public class CampaignService {
         }
     }
 
-    public record FieldError(String field, String code) { }
+    public record FieldError(String field, String code, String message) {
+        public FieldError(String field, String code) {
+            this(field, code, code);
+        }
+    }
 
     public static class FieldValidationException extends RuntimeException {
         private final List<FieldError> errors;
