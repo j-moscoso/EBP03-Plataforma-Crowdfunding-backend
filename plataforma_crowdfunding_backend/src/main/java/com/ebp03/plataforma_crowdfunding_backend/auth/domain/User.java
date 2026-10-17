@@ -78,4 +78,5 @@ public class User {
     public VerificationStatus getVerificationStatus() { return verificationStatus; }
     public AccountStatus getStatus() { return status; }
     public void setVerificationStatus(VerificationStatus verificationStatus) { this.verificationStatus = verificationStatus; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 }

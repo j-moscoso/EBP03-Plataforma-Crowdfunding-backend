@@ -2,6 +2,7 @@ package com.ebp03.plataforma_crowdfunding_backend;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
@@ -17,12 +18,14 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import com.ebp03.plataforma_crowdfunding_backend.auth.FakePasswordResetNotificationSender;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class PlataformaCrowdfundingBackendApplicationTests {
 	@Autowired MockMvc mockMvc;
+	@Autowired FakePasswordResetNotificationSender resetSender;
 
 	@Test
 	void validRegistrationCreatesUserAndSessionWithoutSecrets() throws Exception {
@@ -60,8 +63,8 @@ class PlataformaCrowdfundingBackendApplicationTests {
 	@Test
 	void everyPasswordRuleIsReported() {
 		var policy = new com.ebp03.plataforma_crowdfunding_backend.auth.service.PasswordPolicy();
-		List<String> missing = policy.missingRequirements("abc");
-		assertEquals(List.of("MINIMUM_LENGTH_8", "ONE_UPPERCASE_LETTER", "ONE_NUMBER", "ONE_SYMBOL"), missing);
+		List<String> missing = policy.missingRequirements("");
+		assertEquals(List.of("MINIMUM_LENGTH_8", "ONE_UPPERCASE_LETTER", "ONE_LOWERCASE_LETTER", "ONE_NUMBER", "ONE_SYMBOL"), missing);
 	}
 
 	@Test
@@ -102,6 +105,34 @@ class PlataformaCrowdfundingBackendApplicationTests {
 		mockMvc.perform(post("/api/auth/social").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"provider\":\"google\",\"authorizationCode\":\"invalid\"}"))
 				.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_OAUTH_CODE"));
+	}
+
+	@Test
+	void passwordResetDoesNotRevealWhetherEmailExistsAndRevokesSessions() throws Exception {
+		MvcResult registration = mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"Reset\",\"email\":\"reset@test.local\",\"password\":\"Secure1!\",\"role\":\"creator\"}"))
+			.andExpect(status().isCreated()).andReturn();
+		String registered = mockMvc.perform(post("/api/auth/password-reset/request")
+				.contentType(MediaType.APPLICATION_JSON).content("{\"email\":\" RESET@test.local \"}"))
+			.andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+		String missing = mockMvc.perform(post("/api/auth/password-reset/request")
+				.contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"missing-reset@test.local\"}"))
+			.andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+		assertEquals(registered, missing);
+
+		String token = resetSender.tokenFor("reset@test.local");
+		assertNotNull(token);
+		mockMvc.perform(post("/api/auth/password-reset/validate").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + token + "\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.valid").value(true));
+		mockMvc.perform(post("/api/auth/password-reset/confirm").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"token\":\"" + token + "\",\"newPassword\":\"NewSecure1!\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.loginRequired").value(true));
+		mockMvc.perform(get("/api/auth/me").cookie(registration.getResponse().getCookie("AUTH_SESSION")))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"reset@test.local\",\"password\":\"NewSecure1!\"}"))
+			.andExpect(status().isOk());
 	}
 
 	private String postLogin(String email, String password) throws Exception {

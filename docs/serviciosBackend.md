@@ -179,6 +179,96 @@ Qué hace:
 - elimina la cookie del cliente
 - responde `204 No Content`
 
+## Restablecimiento de contraseña
+
+El flujo es público y no requiere `AUTH_SESSION`. La respuesta de solicitud es
+siempre `202 Accepted` con el mismo cuerpo para correos registrados, inexistentes,
+inválidos o temporalmente bloqueados. El backend no recibe `userId`: la cuenta se
+resuelve por el correo normalizado y el token se entrega por el adaptador
+`PasswordResetNotificationSender`.
+
+### 1) Solicitar instrucciones
+
+`POST /api/auth/password-reset/request`
+
+```json
+{
+  "email": " usuario@example.com "
+}
+```
+
+Respuesta pública:
+
+```json
+{
+  "message": "Si la cuenta cumple los requisitos, recibirás instrucciones para restablecer tu contraseña."
+}
+```
+
+Los tokens se generan con alta entropía, se guardan únicamente como SHA-256,
+expiran por defecto en 15 minutos y los tokens anteriores no usados se
+invalidan. Nunca aparecen en respuestas, logs ni auditoría. Se aplica un límite
+por IP (`PASSWORD_RESET_IP_LIMIT`, por defecto 5 solicitudes por ventana) y un
+límite de tres fallos por cuenta/IP; ambos usan la misma respuesta genérica.
+
+### 2) Validar token
+
+`POST /api/auth/password-reset/validate`
+
+```json
+{
+  "token": "valor-recibido-por-el-canal-configurado"
+}
+```
+
+Respuesta `200`:
+
+```json
+{
+  "valid": true,
+  "expiresAt": "2026-10-16T03:12:00Z"
+}
+```
+
+Un token inexistente, usado, expirado o bloqueado devuelve `400 RESET_TOKEN_INVALID`.
+
+### 3) Confirmar nueva contraseña
+
+`POST /api/auth/password-reset/confirm`
+
+```json
+{
+  "token": "valor-recibido-por-el-canal-configurado",
+  "newPassword": "NuevaSegura1!"
+}
+```
+
+Respuesta `200`:
+
+```json
+{
+  "message": "Contraseña actualizada correctamente.",
+  "loginRequired": true
+}
+```
+
+La contraseña exige mínimo ocho caracteres, mayúscula, minúscula, número y
+símbolo, y no puede ser igual a la actual. Una confirmación válida actualiza el
+hash BCrypt, marca el token como usado, revoca todas las sesiones, registra
+`PASSWORD_CHANGED` y crea una notificación interna `PASSWORD_CHANGED` en una
+sola transacción. Los errores de complejidad usan `VALIDATION_ERROR`/`WEAK_PASSWORD`
+con detalles del campo; nunca incluyen hashes, tokens ni información de la cuenta.
+
+En desarrollo/pruebas debe registrarse un bean `PasswordResetNotificationSender`
+(el perfil de pruebas incluye un adaptador falso). En producción se debe
+configurar `PASSWORD_RESET_NOTIFICATION_ENABLED=true` y
+`PASSWORD_RESET_NOTIFICATION_ENDPOINT` con un adaptador HTTP de entrega de
+correo real, sin cambiar estos contratos públicos. El adaptador
+envía el token únicamente al proveedor configurado; nunca lo escribe en logs.
+La expiración y los límites se configuran mediante:
+`PASSWORD_RESET_TOKEN_MINUTES`, `PASSWORD_RESET_WINDOW_MINUTES` y
+`PASSWORD_RESET_IP_LIMIT`.
+
 ## Endpoints de campañas y borradores
 
 ### 1) Crear borrador

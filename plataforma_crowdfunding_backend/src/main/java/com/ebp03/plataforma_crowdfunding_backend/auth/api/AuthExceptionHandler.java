@@ -6,6 +6,8 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.Inv
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.InvalidOAuthCodeException;
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.InvalidRoleException;
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.WeakPasswordException;
+import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.InvalidPasswordResetTokenException;
+import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.SamePasswordException;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -48,6 +50,16 @@ public class AuthExceptionHandler {
     @ExceptionHandler(WeakPasswordException.class)
     ResponseEntity<ApiError> weakPassword(WeakPasswordException exception) {
         return ResponseEntity.badRequest().body(new ApiError("WEAK_PASSWORD", "La contraseña no cumple los requisitos.", exception.getRequirements()));
+    }
+
+    @ExceptionHandler(InvalidPasswordResetTokenException.class)
+    ResponseEntity<ApiError> invalidPasswordResetToken() {
+        return ResponseEntity.badRequest().body(new ApiError("RESET_TOKEN_INVALID", "El token de recuperación no es válido."));
+    }
+
+    @ExceptionHandler(SamePasswordException.class)
+    ResponseEntity<ApiError> samePassword() {
+        return ResponseEntity.badRequest().body(new ApiError("PASSWORD_REUSE", "La nueva contraseña debe ser diferente."));
     }
 
     @ExceptionHandler(InvalidRoleException.class)
