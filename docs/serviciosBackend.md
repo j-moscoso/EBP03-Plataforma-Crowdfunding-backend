@@ -257,6 +257,164 @@ Qué hace:
 - elimina la cookie del cliente
 - responde `204 No Content`
 
+## Perfil de creador y enlaces
+
+Base URL local: `http://localhost:8080`
+
+`GET /api/creators/me/profile` y `PUT /api/creators/me/profile` requieren la
+cookie `AUTH_SESSION` de una cuenta `CREATOR`. El propietario siempre se obtiene
+de la sesión; no se aceptan identificadores del usuario o del perfil. Una
+sesión ausente, vencida o revocada responde `401`. Un usuario autenticado que no
+sea creador recibe `403 CREATOR_ROLE_REQUIRED`.
+
+Si todavía no existe un perfil, el GET responde `200` con `id`, los datos
+bancarios y las fechas en `null`, `links: []`, `userId` de la sesión y
+`displayName` precargado desde `users.name`. El endpoint PUT crea el perfil o
+actualiza el existente.
+
+### Política regional y campos requeridos
+
+El perfil aplica la política inicial de Colombia acordada para esta HU:
+
+- `displayName` (2–120 caracteres), `bankAccountType`, `bankName`,
+  `bankAccountNumber`, `bankAccountHolder` y `bankAccountDocument` son
+  obligatorios.
+- El tipo de cuenta admite `SAVINGS` o `CHECKING`.
+- El teléfono es opcional; si se informa, debe ser un celular colombiano
+  `+573` seguido de nueve dígitos.
+- El número de cuenta solo admite 5–80 dígitos; el documento colombiano, 5–15
+  dígitos. No se eliminan ni normalizan separadores: se rechazan.
+- `bio` es opcional y admite hasta 2000 caracteres; `professionalTitle` es
+  opcional y admite hasta 120 caracteres.
+- `links` es una lista obligatoria (usa `[]` si no hay enlaces), de hasta 20
+  elementos. Cada enlace admite `PORTFOLIO`, `PROFESSIONAL_NETWORK` u
+  `OTHER_PROJECT`, URL absoluta `http`/`https` y una etiqueta opcional. HTTPS
+  se recomienda. No se permiten URLs duplicadas dentro del perfil. La lista
+  se reemplaza por completo en cada PUT: sus IDs se regeneran y su orden se
+  normaliza a partir de `sortOrder` (cero en adelante).
+
+No hay proveedor de desembolsos real ni política existente que exija
+verificación para guardar los datos; por ello el servicio exige rol `CREATOR`,
+pero no `verificationStatus = VERIFIED`. Los cinco campos bancarios sí son
+requeridos por este contrato. El perfil no modifica el estado de verificación
+ni crea sesiones, cuentas, campañas o aportes.
+
+### Cifrado y privacidad bancaria
+
+El número de cuenta y el documento se cifran con AES-256-GCM. Se requiere
+configurar `CREATOR_PROFILE_ENCRYPTION_KEY` con una clave aleatoria de 32 bytes,
+codificada en Base64, antes de iniciar el backend. No se genera una clave
+temporal por defecto: sin clave válida la aplicación falla al iniciar, para no
+guardar datos que luego no puedan descifrarse. Genérala una sola vez, almacénala
+en el gestor de secretos del entorno y conserva una copia de respaldo protegida;
+perder o rotar la clave sin migrar los datos impide descifrar los valores ya
+guardados. No la incluyas en el repositorio ni en logs. La clave definida en
+`application-test.properties` es solo para pruebas.
+
+Las respuestas solo exponen `bankAccountNumberMasked` y
+`bankAccountDocumentMasked`; nunca devuelven los valores completos. No se
+reciben ni guardan CVV, PIN, contraseña bancaria, credenciales bancarias o
+números completos de tarjeta.
+
+### Consultar perfil
+
+`GET /api/creators/me/profile`
+
+Ejemplo de perfil existente:
+
+```json
+{
+  "id": "UUID",
+  "userId": "UUID",
+  "displayName": "Ana Pérez",
+  "bio": "Diseñadora y creadora de proyectos ambientales.",
+  "professionalTitle": "Diseñadora social",
+  "phone": "+573001112233",
+  "bankAccountType": "SAVINGS",
+  "bankName": "Banco de Prueba",
+  "bankAccountNumberMasked": "******7890",
+  "bankAccountHolder": "Ana Pérez",
+  "bankAccountDocumentMasked": "*******89",
+  "links": [
+    {
+      "id": "UUID",
+      "linkType": "PORTFOLIO",
+      "label": "Mi portafolio",
+      "url": "https://portfolio.example/ana",
+      "sortOrder": 0
+    }
+  ],
+  "createdAt": "2026-10-16T03:00:00Z",
+  "updatedAt": "2026-10-16T03:05:00Z"
+}
+```
+
+### Crear o actualizar perfil
+
+`PUT /api/creators/me/profile`
+
+```json
+{
+  "displayName": "Ana Pérez",
+  "bio": "Diseñadora y creadora de proyectos ambientales.",
+  "professionalTitle": "Diseñadora social",
+  "phone": "+573001112233",
+  "bankAccountType": "SAVINGS",
+  "bankName": "Banco de Prueba",
+  "bankAccountNumber": "1234567890",
+  "bankAccountHolder": "Ana Pérez",
+  "bankAccountDocument": "123456789",
+  "links": [
+    {
+      "linkType": "PORTFOLIO",
+      "label": "Mi portafolio",
+      "url": "https://portfolio.example/ana",
+      "sortOrder": 0
+    },
+    {
+      "linkType": "PROFESSIONAL_NETWORK",
+      "label": "Red profesional",
+      "url": "https://www.linkedin.com/in/ana",
+      "sortOrder": 1
+    }
+  ]
+}
+```
+
+Una respuesta `200` confirma la transacción con el mensaje exacto
+`"Perfil guardado"` y contiene el perfil actualizado con valores bancarios
+enmascarados. La operación guarda el perfil y reemplaza sus enlaces en la
+misma transacción; cualquier error revierte ambos.
+
+Los errores responden `400 VALIDATION_ERROR` con los campos para mostrar
+mensajes inline:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Revisa los campos indicados.",
+  "details": [
+    {
+      "field": "profile.bankAccountNumber",
+      "code": "INVALID_FORMAT",
+      "message": "El número de cuenta debe contener entre 5 y 80 dígitos."
+    },
+    {
+      "field": "links[0].url",
+      "code": "INVALID_URL",
+      "message": "Ingresa una URL válida."
+    }
+  ]
+}
+```
+
+Prueba manual: inicia sesión como creador y conserva su cookie `AUTH_SESSION`;
+llama a `GET http://localhost:8080/api/creators/me/profile` para precargar el
+formulario y envía el body a `PUT` en esa misma URL con
+`Content-Type: application/json`. GET/PUT sin sesión responden `401`; un
+patrocinador recibe `403`; una cuenta inválida devuelve errores de campo y no
+guarda cambios.
+
 ## Restablecimiento de contraseña
 
 El flujo es público y no requiere `AUTH_SESSION`. La respuesta de solicitud es

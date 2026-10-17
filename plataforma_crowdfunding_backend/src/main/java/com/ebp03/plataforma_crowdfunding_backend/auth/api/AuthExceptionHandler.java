@@ -10,6 +10,9 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.Inv
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.SamePasswordException;
 import com.ebp03.plataforma_crowdfunding_backend.auth.api.UpdateUserProfileRequest.UnknownProfileFieldException;
 import com.ebp03.plataforma_crowdfunding_backend.auth.api.UpdateUserProfileRequest.InvalidProfileFieldTypeException;
+import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorProfileRequest;
+import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.service.CreatorProfileValidationException;
+import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorProfileRequest.UnknownCreatorProfileFieldException;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -36,8 +39,13 @@ public class AuthExceptionHandler {
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
-    ResponseEntity<ApiError> duplicateConstraint() {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiError("EMAIL_ALREADY_IN_USE", "El correo ya está en uso."));
+    ResponseEntity<ApiError> duplicateConstraint(DataIntegrityViolationException exception) {
+        if (isEmailConstraint(exception)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ApiError("EMAIL_ALREADY_IN_USE", "El correo ya está en uso."));
+        }
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError("DATA_CONFLICT", "La operación entra en conflicto con datos existentes."));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
@@ -78,24 +86,51 @@ public class AuthExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> invalidRequest(MethodArgumentNotValidException exception) {
         List<ValidationErrorDetail> details = exception.getBindingResult().getFieldErrors().stream()
-                .map(error -> new ValidationErrorDetail(error.getField(), validationCode(error.getCode()), error.getDefaultMessage()))
+                .map(error -> new ValidationErrorDetail(
+                        profileField(exception, error.getField()),
+                        "url".equals(error.getField().substring(error.getField().lastIndexOf('.') + 1))
+                                && "ValidProfileUrl".equals(error.getCode())
+                                ? "INVALID_URL" : validationCode(error.getCode()),
+                        error.getDefaultMessage()))
                 .toList();
         return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", details));
     }
 
+    @ExceptionHandler(CreatorProfileValidationException.class)
+    ResponseEntity<ApiError> creatorProfileValidation(CreatorProfileValidationException exception) {
+        return ResponseEntity.badRequest().body(new ApiError(
+                "VALIDATION_ERROR", "Revisa los campos indicados.", exception.getDetails()));
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> unreadableRequest(HttpMessageNotReadableException exception) {
+        UnknownCreatorProfileFieldException unknownCreatorField = findUnknownCreatorProfileField(exception);
         UnknownProfileFieldException unknownField = findUnknownProfileField(exception);
         InvalidProfileFieldTypeException invalidType = findInvalidProfileFieldType(exception);
-        ValidationErrorDetail detail;
-        if (unknownField != null) {
-            detail = new ValidationErrorDetail(unknownField.getField(), "UNKNOWN_FIELD", "El campo no está permitido.");
+        List<ValidationErrorDetail> details;
+        if (unknownCreatorField != null) {
+            details = List.of(new ValidationErrorDetail(
+                    "profile." + unknownCreatorField.getField(), "UNKNOWN_FIELD", "El campo no está permitido."));
+        } else if (unknownField != null) {
+            details = List.of(new ValidationErrorDetail(unknownField.getField(), "UNKNOWN_FIELD", "El campo no está permitido."));
         } else if (invalidType != null) {
-            detail = new ValidationErrorDetail(invalidType.getField(), "INVALID_FORMAT", "El nombre debe ser texto.");
+            details = List.of(new ValidationErrorDetail(invalidType.getField(), "INVALID_FORMAT", "El nombre debe ser texto."));
         } else {
-            detail = new ValidationErrorDetail("body", "INVALID_BODY", "El cuerpo de la solicitud no es válido.");
+            details = List.of(new ValidationErrorDetail("body", "INVALID_BODY", "El cuerpo de la solicitud no es válido."));
         }
-        return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", List.of(detail)));
+        return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", details));
+    }
+
+    private String profileField(MethodArgumentNotValidException exception, String field) {
+        if (exception.getParameter().getParameterType() != SaveCreatorProfileRequest.class) return field;
+        return field.startsWith("links[") ? field : "profile." + field;
+    }
+
+    private UnknownCreatorProfileFieldException findUnknownCreatorProfileField(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof UnknownCreatorProfileFieldException unknownField) return unknownField;
+        }
+        return null;
     }
 
     @ExceptionHandler(ResponseStatusException.class)
@@ -126,5 +161,15 @@ public class AuthExceptionHandler {
             if (cause instanceof InvalidProfileFieldTypeException invalidType) return invalidType;
         }
         return null;
+    }
+
+    private boolean isEmailConstraint(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof org.hibernate.exception.ConstraintViolationException violation) {
+                String constraint = violation.getConstraintName();
+                return constraint != null && constraint.toLowerCase(java.util.Locale.ROOT).contains("users_email");
+            }
+        }
+        return false;
     }
 }
