@@ -272,7 +272,7 @@ public class ContributionService {
         if (amount.compareTo(remaining) > 0)
             throw new ContributionCapacityException();
     }
-    }
+    
     private CampaignReward findReward(Campaign campaign, UUID rewardId) {
         if (rewardId == null) return null;
         return campaign.getRewards().stream().filter(reward -> reward.getId().equals(rewardId)).findFirst()
