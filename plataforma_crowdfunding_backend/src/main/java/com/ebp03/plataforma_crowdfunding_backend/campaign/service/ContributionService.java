@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -51,6 +52,8 @@ public class ContributionService {
         if (existing.isPresent()) return response(existing.get());
         Campaign campaign = activeCampaign(campaignId);
         validateAmount(request.amount(), request.currency());
+        String currency = request.currency().trim().toUpperCase(Locale.ROOT);
+        requireCampaignCurrency(campaign.getId(), currency);
         CampaignReward reward = findReward(campaign, request.rewardId());
         if (reward != null) {
             if (request.amount().compareTo(reward.getMinimumAmount()) < 0) bad("El monto no alcanza el mínimo de la recompensa");
@@ -59,7 +62,7 @@ public class ContributionService {
         if (request.paymentMethodId() == null || request.paymentMethodId().isBlank()) bad("paymentMethodId es obligatorio");
 
         Contribution contribution = contributions.save(new Contribution(campaign, sponsor.getId(), reward,
-                request.amount().setScale(2), request.currency().trim().toUpperCase(), ContributionStatus.PENDING, idempotencyKey));
+                request.amount().setScale(2), currency, ContributionStatus.PENDING, idempotencyKey));
         Payment payment = payments.save(new Payment(contribution, "simulated", contribution.getAmount(),
                 contribution.getAmount().multiply(feeRate).setScale(2, RoundingMode.HALF_UP)));
         applyProviderResult(contribution, payment, paymentProvider.charge(request.paymentMethodId(), contribution.getAmount(), contribution.getCurrency()));
@@ -76,6 +79,7 @@ public class ContributionService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "CONTRIBUTION_ALREADY_REFUNDED");
         }
         Campaign campaign = activeCampaign(contribution.getCampaign().getId());
+        requireCampaignCurrency(campaign.getId(), contribution.getCurrency());
         if (contribution.getReward() != null && contribution.getReward().getQuantity() != null
                 && contribution.getReward().getClaimedQuantity() >= contribution.getReward().getQuantity()) bad("La recompensa no está disponible");
         contribution.setStatus(ContributionStatus.PENDING);
@@ -227,10 +231,16 @@ public class ContributionService {
     }
 
     private Campaign activeCampaign(UUID id) {
-        Campaign campaign = campaigns.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
+        Campaign campaign = campaigns.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
         if (campaign.getStatus() != CampaignStatus.ACTIVE || !campaign.getDeadline().isAfter(Instant.now()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_NOT_ACTIVE");
         return campaign;
+    }
+    private void requireCampaignCurrency(UUID campaignId, String currency) {
+        if (contributions.existsWithDifferentCurrency(campaignId, currency)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_CURRENCY_MISMATCH");
+        }
     }
     private CampaignReward findReward(Campaign campaign, UUID rewardId) {
         if (rewardId == null) return null;

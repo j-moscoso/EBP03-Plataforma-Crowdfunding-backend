@@ -879,7 +879,7 @@ Body:
 }
 ```
 
-El servidor verifica campaña activa y no vencida, monto positivo, moneda de tres letras, pertenencia de la recompensa, mínimo, inventario y rol. La misma clave para el mismo sponsor devuelve el mismo aporte y pago. Un fallo responde con el estado `FAILED`, mensaje genérico y permite reintento; el código técnico queda solo en `payments.failure_code`.
+El servidor verifica campaña activa y no vencida, monto positivo, moneda de tres letras, pertenencia de la recompensa, mínimo, inventario y rol. Todas las contribuciones de una campaña deben usar la misma moneda: la primera contribución registrada establece la moneda y una solicitud posterior con otra moneda responde `409 CAMPAIGN_CURRENCY_MISMATCH`. La misma clave para el mismo sponsor devuelve el mismo aporte y pago. Un fallo responde con el estado `FAILED`, mensaje genérico y permite reintento; el código técnico queda solo en `payments.failure_code`.
 
 Respuesta `201`:
 
@@ -966,7 +966,45 @@ El reintento crea un nuevo registro `payments` asociado al mismo aporte. Si el a
 
 Headers: `X-Provider-Event-Id` único y `X-Payment-Signature`. La firma es HMAC-SHA256 con clave `PAYMENT_WEBHOOK_SECRET` sobre la concatenación de los campos `payload`, `eventId`, `paymentId`, `eventType` y `status`; cada campo se codifica como `longitud UTF-8:valor` y el resultado se envía en hexadecimal. El cuerpo es el payload crudo del proveedor. Un adaptador transforma el estado externo al estado interno sin exponer el payload ni los secretos. Se valida la firma, se guarda `providerEventId` y se procesa el cambio una sola vez. Los cambios de éxito/refund actualizan `payment`, `contribution` y el comprobante en la misma transacción; eventos duplicados o tardíos no revierten un reembolso. Firma inválida responde `401` y no persiste el evento.
 
-### 6) Progreso público
+### 6) Campañas apoyadas
+
+`GET /api/sponsors/me/supported-campaigns?page=0&pageSize=10`
+
+Requiere sesión `AUTH_SESSION` de un usuario con rol `SPONSOR`. El patrocinador se obtiene exclusivamente de la sesión. Solo se aceptan `page` y `pageSize`; enviar otros parámetros (incluidos `sponsorId`, `userId` o identificadores de campañas) responde `400 INVALID_PARAMETER`. `page` debe ser no negativo y `pageSize` debe estar entre 1 y 50. Un creator recibe `403` y una solicitud sin sesión recibe `401`.
+
+El tablero contiene una tarjeta por campaña con al menos un aporte `CONFIRMED` del patrocinador. `amountContributedByMe` suma sus aportes confirmados; `raisedAmount` suma los aportes confirmados de todos los patrocinadores. Los aportes `PENDING`, `FAILED` y `REFUNDED` se excluyen. La moneda debe ser única para toda la campaña; campañas históricas que tengan aportes confirmados en monedas distintas se omiten del tablero y se registra una advertencia en el backend. Los montos se agregan en la base de datos y el porcentaje se calcula con precisión decimal, redondeado a dos decimales y limitado a 100.
+
+Las tarjetas se ordenan por la fecha del último aporte confirmado del patrocinador, descendente, y `campaignId` descendente como desempate. Los códigos internos se presentan así: `ACTIVE`/`PUBLISHED` → `ACTIVA`, `SUCCESSFUL` → `EXITOSA`, `FAILED` → `FALLIDA`, `DRAFT` → `BORRADOR` y `CANCELLED` → `CANCELADA`.
+
+Respuesta `200`:
+
+```json
+{
+  "content": [
+    {
+      "campaignId": "UUID",
+      "imageUrl": "https://cdn.example/campaign.jpg",
+      "title": "Bosques de la vida",
+      "amountContributedByMe": 125.00,
+      "currency": "USD",
+      "raisedAmount": 5000.00,
+      "goalAmount": 10000.00,
+      "totalRaisedPercentage": 50.00,
+      "status": "ACTIVA",
+      "statusCode": "ACTIVE",
+      "lastContributionAt": "2026-10-16T03:10:00Z"
+    }
+  ],
+  "page": 0,
+  "pageSize": 10,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Sin campañas apoyadas, `content` es `[]`, `totalElements` y `totalPages` son cero, y `emptyMessage` es `"Aún no has apoyado ningún proyecto"`.
+
+### 7) Progreso público
 
 `GET /api/campaigns/{campaignId}/progress`
 
@@ -991,5 +1029,6 @@ Solo los aportes `CONFIRMED` incrementan `raisedAmount`, porcentaje, sponsors e 
 - Sin sesión: `401`; creator intentando aportar o sponsor accediendo a otro aporte: `403`.
 - Monto cero/negativo, moneda inválida, reward de otra campaña o mínimo incumplido: `400`.
 - Campaña inactiva o vencida: `409` con código `CAMPAIGN_NOT_ACTIVE`.
+- Moneda incompatible con la ya usada en la campaña: `409 CAMPAIGN_CURRENCY_MISMATCH`.
 - No se aceptan tarjetas, CVV ni fechas de vencimiento en ningún body.
 - Una intención `PENDING` o una respuesta de pago no definitiva no cambia el progreso.
