@@ -8,10 +8,13 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.Inv
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.WeakPasswordException;
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.InvalidPasswordResetTokenException;
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthExceptions.SamePasswordException;
+import com.ebp03.plataforma_crowdfunding_backend.auth.api.UpdateUserProfileRequest.UnknownProfileFieldException;
+import com.ebp03.plataforma_crowdfunding_backend.auth.api.UpdateUserProfileRequest.InvalidProfileFieldTypeException;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -74,9 +77,25 @@ public class AuthExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> invalidRequest(MethodArgumentNotValidException exception) {
-        List<String> details = exception.getBindingResult().getFieldErrors().stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage()).toList();
-        return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "La solicitud no es válida.", details));
+        List<ValidationErrorDetail> details = exception.getBindingResult().getFieldErrors().stream()
+                .map(error -> new ValidationErrorDetail(error.getField(), validationCode(error.getCode()), error.getDefaultMessage()))
+                .toList();
+        return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", details));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ApiError> unreadableRequest(HttpMessageNotReadableException exception) {
+        UnknownProfileFieldException unknownField = findUnknownProfileField(exception);
+        InvalidProfileFieldTypeException invalidType = findInvalidProfileFieldType(exception);
+        ValidationErrorDetail detail;
+        if (unknownField != null) {
+            detail = new ValidationErrorDetail(unknownField.getField(), "UNKNOWN_FIELD", "El campo no está permitido.");
+        } else if (invalidType != null) {
+            detail = new ValidationErrorDetail(invalidType.getField(), "INVALID_FORMAT", "El nombre debe ser texto.");
+        } else {
+            detail = new ValidationErrorDetail("body", "INVALID_BODY", "El cuerpo de la solicitud no es válido.");
+        }
+        return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", List.of(detail)));
     }
 
     @ExceptionHandler(ResponseStatusException.class)
@@ -84,5 +103,28 @@ public class AuthExceptionHandler {
         String reason = exception.getReason() == null ? "La solicitud no es válida." : exception.getReason();
         String code = reason.matches("[A-Z][A-Z0-9_]+") ? reason : "REQUEST_ERROR";
         return ResponseEntity.status(exception.getStatusCode()).body(new ApiError(code, code.equals("REQUEST_ERROR") ? reason : "La operación no pudo completarse."));
+    }
+
+    private String validationCode(String constraintCode) {
+        return switch (constraintCode == null ? "" : constraintCode) {
+            case "NotBlank", "NotNull" -> "REQUIRED";
+            case "Size" -> "LENGTH";
+            case "Pattern" -> "INVALID_FORMAT";
+            default -> "INVALID";
+        };
+    }
+
+    private UnknownProfileFieldException findUnknownProfileField(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof UnknownProfileFieldException unknownField) return unknownField;
+        }
+        return null;
+    }
+
+    private InvalidProfileFieldTypeException findInvalidProfileFieldType(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidProfileFieldTypeException invalidType) return invalidType;
+        }
+        return null;
     }
 }

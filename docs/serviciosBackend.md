@@ -167,7 +167,85 @@ Respuesta `200`:
 }
 ```
 
-### 5) Cierre de sesión
+### 5) Consultar y actualizar datos personales
+
+La URL base local es `http://localhost:8080`. Estos endpoints requieren la cookie
+`AUTH_SESSION` creada al iniciar sesión y siempre resuelven la cuenta desde esa
+sesión; no aceptan identificadores de usuario.
+
+`GET /api/auth/me` devuelve los valores actuales de la tabla `users`:
+
+```json
+{
+  "id": "UUID",
+  "name": "Ana Pérez",
+  "email": "ana@example.com",
+  "role": "creator",
+  "verificationStatus": "verified"
+}
+```
+
+`PATCH /api/auth/me` actualiza únicamente `name`.
+
+Body:
+
+```json
+{
+  "name": "Ana Pérez"
+}
+```
+
+El nombre se recorta antes de guardar y debe contener entre 2 y 120 caracteres
+de texto permitido. Campos adicionales y protegidos se rechazan.
+Las modificaciones concurrentes se serializan con bloqueo de la fila del
+usuario; prevalece la última transacción que obtenga y complete el bloqueo.
+
+Respuesta `200`:
+
+```json
+{
+  "message": "Datos actualizados",
+  "user": {
+    "id": "UUID",
+    "name": "Ana Pérez",
+    "email": "ana@example.com",
+    "role": "creator",
+    "verificationStatus": "verified"
+  }
+}
+```
+
+Los errores de validación responden `400` e identifican cada campo para mostrar
+mensajes inline:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Revisa los campos indicados.",
+  "details": [
+    {
+      "field": "name",
+      "code": "REQUIRED",
+      "message": "El nombre es obligatorio."
+    }
+  ]
+}
+```
+
+Una cookie ausente, inválida, vencida o revocada responde `401 Unauthorized`.
+El correo se mantiene de solo lectura porque el proyecto no cuenta con un flujo
+de verificación para reemplazarlo de forma segura. No se necesita migración: la
+tabla `users` existente ya tiene `name VARCHAR(120) NOT NULL`,
+`email VARCHAR(320) NOT NULL UNIQUE` y `updated_at`.
+
+Prueba manual: primero inicia sesión normalmente y conserva la cookie en el
+mismo cliente HTTP. Luego solicita `GET http://localhost:8080/api/auth/me` para
+precargar el formulario y envía `PATCH http://localhost:8080/api/auth/me` con
+`Content-Type: application/json` y el body anterior. GET/PATCH sin cookie
+devuelven `401`; un PATCH exitoso devuelve el nombre actualizado y conserva la
+sesión.
+
+### 6) Cierre de sesión
 
 `POST /api/auth/logout`
 
