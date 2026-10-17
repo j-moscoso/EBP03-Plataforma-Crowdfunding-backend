@@ -910,7 +910,35 @@ Respuesta `201`:
 
 `GET /api/contributions/me?page=0&pageSize=10&status=CONFIRMED`
 
-Requiere sponsor. `status` es opcional (`PENDING`, `CONFIRMED`, `FAILED`, `REFUNDED`). Responde `content`, `page`, `pageSize`, `totalElements` y `totalPages`; solo incluye aportes del usuario autenticado y no incluye datos de pago sensibles.
+Requiere sesión `AUTH_SESSION` de un usuario con rol `SPONSOR`. El sponsor se obtiene de la sesión y nunca de parámetros. `status` es opcional (`PENDING`, `CONFIRMED`, `FAILED`, `REFUNDED`); `page` debe ser no negativo y `pageSize` está limitado de 1 a 50. El historial se pagina en base de datos y se ordena por fecha e identificador descendentes. Un filtro o valor de paginación inválido responde `400 INVALID_PARAMETER`; un creator recibe `403`.
+
+La respuesta resume cada aporte con fecha, campaña, monto decimal, moneda, referencia y estado de comprobante y de pago. No incluye `idempotency_key`, secretos ni información técnica del proveedor. Los comprobantes se guardan en `transaction_receipts`; V8 genera una referencia para aportes históricos confirmados con pago exitoso. En nuevas transacciones, el backend emite comprobante al confirmar el pago. Un aporte pendiente o fallido no recibe comprobante. Los estados de comprobante son `HELD` (Retenido), `SUCCESSFUL` (Exitoso), `REFUNDED` (Reembolsado) y `FAILED` (Fallido).
+
+Sin aportes, se devuelve `content: []`, cero elementos/páginas y `emptyMessage: "Aún no has realizado aportes"`.
+
+```json
+{
+  "content": [
+    {
+      "contributionId": "UUID",
+      "date": "2026-10-16T03:10:00Z",
+      "campaignId": "UUID",
+      "projectName": "Bosques de la vida",
+      "amount": 100.00,
+      "currency": "USD",
+      "referenceCode": "REF-UUID",
+      "receiptStatus": "SUCCESSFUL",
+      "receiptStatusLabel": "Exitoso",
+      "contributionStatus": "CONFIRMED",
+      "paymentStatus": "SUCCEEDED"
+    }
+  ],
+  "page": 0,
+  "pageSize": 10,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
 
 ### 3) Detalle de aporte
 
@@ -934,9 +962,9 @@ El reintento crea un nuevo registro `payments` asociado al mismo aporte. Si el a
 
 ### 5) Webhook del proveedor
 
-`POST /api/payments/webhook?paymentId={paymentId}&eventType=payment.succeeded&status=succeeded`
+`POST /api/payments/webhook?paymentId={paymentId}&eventType=payment.succeeded&status=succeeded|failed|refunded|processing`
 
-Headers: `X-Provider-Event-Id` único y `X-Payment-Signature`, calculada en desarrollo como SHA-256 de `PAYMENT_WEBHOOK_SECRET + payload` en hexadecimal. El cuerpo es el payload crudo del proveedor. Se valida la firma, se guarda `providerEventId` y se procesa el cambio una sola vez. La confirmación actualiza `payment`, `contribution`, `claimedQuantity` y progreso dentro de una transacción. Firma inválida responde `401` y no persiste el evento.
+Headers: `X-Provider-Event-Id` único y `X-Payment-Signature`. La firma es HMAC-SHA256 con clave `PAYMENT_WEBHOOK_SECRET` sobre la concatenación de los campos `payload`, `eventId`, `paymentId`, `eventType` y `status`; cada campo se codifica como `longitud UTF-8:valor` y el resultado se envía en hexadecimal. El cuerpo es el payload crudo del proveedor. Un adaptador transforma el estado externo al estado interno sin exponer el payload ni los secretos. Se valida la firma, se guarda `providerEventId` y se procesa el cambio una sola vez. Los cambios de éxito/refund actualizan `payment`, `contribution` y el comprobante en la misma transacción; eventos duplicados o tardíos no revierten un reembolso. Firma inválida responde `401` y no persiste el evento.
 
 ### 6) Progreso público
 

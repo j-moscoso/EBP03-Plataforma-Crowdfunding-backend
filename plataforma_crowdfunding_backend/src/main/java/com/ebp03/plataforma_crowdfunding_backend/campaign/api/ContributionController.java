@@ -2,6 +2,7 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.api;
 
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.ContributionService;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.service.TransactionHistoryService;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -11,11 +12,21 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api")
 public class ContributionController {
     private final ContributionService service;
-    public ContributionController(ContributionService service) { this.service = service; }
+    private final TransactionHistoryService transactionHistoryService;
+    public ContributionController(ContributionService service, TransactionHistoryService transactionHistoryService) {
+        this.service = service;
+        this.transactionHistoryService = transactionHistoryService;
+    }
     @PostMapping("/campaigns/{campaignId}/contributions")
     public ResponseEntity<?> create(@AuthenticationPrincipal User user, @PathVariable UUID campaignId, @RequestHeader("Idempotency-Key") String key, @RequestBody ContributionService.CreateRequest request) { return ResponseEntity.status(201).body(service.create(user, campaignId, request, key)); }
     @GetMapping("/contributions/me")
-    public ResponseEntity<?> me(@AuthenticationPrincipal User user, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int pageSize, @RequestParam(required = false) String status) { return ResponseEntity.ok(service.list(user, page, pageSize, status)); }
+    public ResponseEntity<TransactionHistoryService.HistoryPageResponse> me(
+            @AuthenticationPrincipal User user,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String status) {
+        return ResponseEntity.ok(transactionHistoryService.getHistory(user, page, pageSize, status));
+    }
     @GetMapping("/contributions/{contributionId}")
     public ResponseEntity<?> detail(@AuthenticationPrincipal User user, @PathVariable UUID contributionId) { return ResponseEntity.ok(service.detail(user, contributionId)); }
     @PostMapping("/contributions/{contributionId}/retry")
