@@ -75,6 +75,7 @@ public class SampleDataSeeder {
                     Instant.now().plusSeconds(45L * 24L * 60L * 60L),
                     "Medio ambiente",
                     "https://example.com/media/bosques.jpg",
+                    "USD",
                     CampaignStatus.ACTIVE));
             createdCampaign.setRewards(List.of(
                     new CampaignReward(createdCampaign, "Agradecimiento", "Reconocimiento digital", new BigDecimal("10.00"), null, 0),

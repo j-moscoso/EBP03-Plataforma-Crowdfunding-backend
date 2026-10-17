@@ -71,6 +71,10 @@ public class CampaignService {
     public DraftResponse createDraft(User creator, DraftCreateRequest request) {
         requireActiveCreator(creator);
         List<FieldError> errors = validateDraftFields(request.goalAmount(), request.durationDays(), request.category(), request.rewards());
+        String currency = normalizeCurrency(request.currency());
+        if (request.currency() != null && currency == null) {
+            errors.add(new FieldError("currency", "INVALID"));
+        }
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
 
         CampaignDraft draft = new CampaignDraft(
@@ -80,7 +84,8 @@ public class CampaignService {
                 request.goalAmount(),
                 request.durationDays(),
                 normalizeCategory(request.category()),
-                request.mediaUrl());
+                request.mediaUrl(),
+                currency);
         draft.setCompletionPercentage(calculateCompletionPercentage(draft));
         if (request.rewards() != null && !request.rewards().isEmpty()) {
             List<DraftReward> rewards = new ArrayList<>();
@@ -127,8 +132,12 @@ public class CampaignService {
         String title = request.title() != null ? normalizeText(request.title()) : draft.getTitle();
         String description = request.description() != null ? normalizeText(request.description()) : draft.getDescription();
         String mediaUrl = request.mediaUrl() != null ? request.mediaUrl() : draft.getMediaUrl();
+        String currency = request.currency() != null ? normalizeCurrency(request.currency()) : draft.getCurrency();
 
         List<FieldError> errors = validateDraftFields(goalAmount, durationDays, category, request.rewards() != null ? request.rewards() : convertRewards(draft.getRewards()));
+        if (request.currency() != null && currency == null) {
+            errors.add(new FieldError("currency", "INVALID"));
+        }
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
 
         draft.setTitle(title);
@@ -137,6 +146,7 @@ public class CampaignService {
         draft.setDurationDays(durationDays);
         draft.setCategory(category);
         draft.setMediaUrl(mediaUrl);
+        draft.setCurrency(currency);
         draft.setCompletionPercentage(calculateCompletionPercentage(draft));
         draft.setSavedAt(Instant.now());
 
@@ -175,6 +185,9 @@ public class CampaignService {
 
         List<FieldError> errors = validateDraftFields(draft.getGoalAmount(), draft.getDurationDays(), draft.getCategory(), convertRewards(draft.getRewards()));
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
+        if (draft.getCurrency() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CAMPAIGN_CURRENCY_REQUIRED");
+        }
 
         Instant now = Instant.now();
         Instant deadline = now.plusSeconds((long) draft.getDurationDays() * 24L * 60L * 60L);
@@ -186,6 +199,7 @@ public class CampaignService {
                 deadline,
                 normalizeCategory(draft.getCategory()),
                 draft.getMediaUrl(),
+                draft.getCurrency(),
                 CampaignStatus.ACTIVE);
         campaign.setPublishedAt(now);
         campaign = campaignRepository.save(campaign);
@@ -306,6 +320,8 @@ public class CampaignService {
                 campaign.getDeadline(),
                 campaign.getCategory(),
                 campaign.getMediaUrl(),
+                campaign.getCurrency(),
+                campaignCurrencyStatus(campaign),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
                 campaign.getCreatedAt(),
@@ -325,6 +341,8 @@ public class CampaignService {
                 campaign.getDeadline(),
                 campaign.getCategory(),
                 campaign.getMediaUrl(),
+                campaign.getCurrency(),
+                campaignCurrencyStatus(campaign),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
                 progress(campaign)
@@ -489,6 +507,16 @@ public class CampaignService {
         return VALID_CATEGORIES.contains(normalized) ? normalized : normalized;
     }
 
+    private String normalizeCurrency(String currency) {
+        if (currency == null) return null;
+        String normalized = currency.trim().toUpperCase(java.util.Locale.ROOT);
+        return normalized.matches("[A-Z]{3}") ? normalized : null;
+    }
+
+    private String campaignCurrencyStatus(Campaign campaign) {
+        return campaign.getCurrency() == null ? "UNAVAILABLE" : "CONFIGURED";
+    }
+
     public record RewardRequest(String title, String description, BigDecimal minimumAmount) { }
 
     public record DraftCreateRequest(String title,
@@ -497,7 +525,8 @@ public class CampaignService {
                                      Integer durationDays,
                                      String category,
                                      String mediaUrl,
-                                     List<RewardRequest> rewards) { }
+                                     List<RewardRequest> rewards,
+                                     String currency) { }
 
     public record DraftUpdateRequest(String title,
                                      String description,
@@ -505,7 +534,8 @@ public class CampaignService {
                                      Integer durationDays,
                                      String category,
                                      String mediaUrl,
-                                     List<RewardRequest> rewards) { }
+                                     List<RewardRequest> rewards,
+                                     String currency) { }
 
     public record PageResponse<T>(List<T> content,
                                   int page,
@@ -524,6 +554,7 @@ public class CampaignService {
                                Integer durationDays,
                                String category,
                                String mediaUrl,
+                               String currency,
                                List<RewardResponse> rewards,
                                Integer completionPercentage,
                                Instant savedAt,
@@ -538,6 +569,7 @@ public class CampaignService {
                     draft.getDurationDays(),
                     draft.getCategory(),
                     draft.getMediaUrl(),
+                    draft.getCurrency(),
                     draft.getRewards().stream()
                             .sorted((left, right) -> Integer.compare(left.getSortOrder(), right.getSortOrder()))
                             .map(reward -> new RewardResponse(reward.getId(), reward.getTitle(), reward.getDescription(), reward.getMinimumAmount(), null, null))
@@ -568,6 +600,8 @@ public class CampaignService {
                                          Instant deadline,
                                          String category,
                                          String mediaUrl,
+                                         String currency,
+                                         String currencyStatus,
                                          CampaignStatus status,
                                          Instant publishedAt,
                                          CampaignProgress progress) { }
@@ -580,6 +614,8 @@ public class CampaignService {
                                         Instant deadline,
                                         String category,
                                         String mediaUrl,
+                                        String currency,
+                                        String currencyStatus,
                                         CampaignStatus status,
                                         Instant publishedAt,
                                         Instant createdAt,

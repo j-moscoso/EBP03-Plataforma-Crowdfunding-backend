@@ -100,6 +100,26 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
             """, nativeQuery = true)
     long countMixedCurrencyCampaignsForSponsor(@Param("sponsorId") UUID sponsorId);
 
+    @Query(value = """
+            SELECT CAST(campaign.id AS VARCHAR(36)) AS "campaignId",
+                   campaign.title AS "title",
+                   UPPER(contribution.currency) AS "currency"
+            FROM campaigns campaign
+            JOIN contributions contribution ON contribution.campaign_id = campaign.id
+            WHERE contribution.status = 'CONFIRMED'
+              AND EXISTS (
+                  SELECT 1
+                  FROM contributions personal
+                  WHERE personal.campaign_id = campaign.id
+                    AND personal.sponsor_id = :sponsorId
+                    AND personal.status = 'CONFIRMED'
+              )
+            GROUP BY campaign.id, campaign.title, UPPER(contribution.currency)
+            ORDER BY campaign.id, UPPER(contribution.currency)
+            """, nativeQuery = true)
+    List<SupportedCampaignCurrencyProjection> findSupportedCampaignCurrencies(
+            @Param("sponsorId") UUID sponsorId);
+
     @Query("""
             select case when count(c) > 0 then true else false end
             from Contribution c

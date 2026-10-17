@@ -44,6 +44,9 @@ public class Campaign {
     @Column(name = "media_url", length = 500)
     private String mediaUrl;
 
+    @Column(length = 3)
+    private String currency;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CampaignStatus status;
@@ -68,6 +71,11 @@ public class Campaign {
 
     public Campaign(UUID creatorId, String title, String description, BigDecimal goalAmount,
                    Instant deadline, String category, String mediaUrl, CampaignStatus status) {
+        this(creatorId, title, description, goalAmount, deadline, category, mediaUrl, null, status);
+    }
+
+    public Campaign(UUID creatorId, String title, String description, BigDecimal goalAmount,
+                   Instant deadline, String category, String mediaUrl, String currency, CampaignStatus status) {
         this.id = UUID.randomUUID();
         this.creatorId = creatorId;
         this.title = title;
@@ -76,6 +84,7 @@ public class Campaign {
         this.deadline = deadline;
         this.category = category;
         this.mediaUrl = mediaUrl;
+        this.currency = currency;
         this.status = status;
     }
 
@@ -102,6 +111,7 @@ public class Campaign {
     public Instant getDeadline() { return deadline; }
     public String getCategory() { return category; }
     public String getMediaUrl() { return mediaUrl; }
+    public String getCurrency() { return currency; }
     public CampaignStatus getStatus() { return status; }
     public Instant getPublishedAt() { return publishedAt; }
     public Instant getCreatedAt() { return createdAt; }
@@ -115,6 +125,7 @@ public class Campaign {
     public void setDeadline(Instant deadline) { this.deadline = deadline; }
     public void setCategory(String category) { this.category = category; }
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
+    public void setCurrency(String currency) { this.currency = currency; }
     public void setStatus(CampaignStatus status) { this.status = status; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
     public void setRewards(List<CampaignReward> rewards) { this.rewards.clear(); if (rewards != null) { this.rewards.addAll(rewards); for (CampaignReward reward : this.rewards) { reward.setCampaign(this); } } }
