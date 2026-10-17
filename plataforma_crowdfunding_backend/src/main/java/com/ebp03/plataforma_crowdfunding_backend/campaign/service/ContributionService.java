@@ -116,7 +116,15 @@ public class ContributionService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND"));
         if (events.findByProviderEventId(providerEventId).isPresent()) return;
         PaymentEvent event = events.save(new PaymentEvent(payment, providerEventId, eventType, sha256(payload)));
-        applyWebhookStatus(payment, targetStatus);
+        try {
+            applyWebhookStatus(payment, targetStatus);
+        } catch (ContributionCapacityException exception) {
+            failForCapacity(payment.getContribution(), payment, exception);
+            payments.save(payment);
+            contributions.save(payment.getContribution());
+            event.setProcessedAt(Instant.now());
+            throw exception;
+        }
         event.setProcessedAt(Instant.now());
     }
 
@@ -147,10 +155,9 @@ public class ContributionService {
             try {
                 confirm(contribution);
                 payment.setStatus(PaymentStatus.SUCCEEDED); payment.setProviderPaymentId(result.providerPaymentId());
+                createOrUpdateReceipt(contribution, TransactionReceiptStatus.SUCCESSFUL);
             } catch (ContributionCapacityException exception) {
-                payment.setStatus(PaymentStatus.FAILED);
-                payment.setFailure(exception.getReason(), "El aporte ya no cabe en el restante de la campaña.");
-                contribution.setStatus(ContributionStatus.FAILED);
+                failForCapacity(contribution, payment, exception);
                 payments.save(payment);
                 contributions.save(contribution);
                 throw exception;
@@ -168,7 +175,7 @@ public class ContributionService {
                 if (payment.getStatus() == PaymentStatus.CREATED) payment.setStatus(PaymentStatus.PROCESSING);
             }
             case SUCCEEDED -> {
-                if (payment.getStatus() != PaymentStatus.FAILED && payment.getStatus() != PaymentStatus.REFUNDED) {
+                if (payment.getStatus() != PaymentStatus.REFUNDED) {
                     markSuccessful(contribution, payment, payment.getProviderPaymentId());
                 }
             }
@@ -181,7 +188,7 @@ public class ContributionService {
     }
 
     private void markSuccessful(Contribution contribution, Payment payment, String providerPaymentId) {
-        if (payment.getStatus() == PaymentStatus.REFUNDED || payment.getStatus() == PaymentStatus.FAILED
+        if (payment.getStatus() == PaymentStatus.REFUNDED
                 || contribution.getStatus() == ContributionStatus.REFUNDED) {
             return;
         }
@@ -242,6 +249,16 @@ public class ContributionService {
         contribution.setStatus(ContributionStatus.CONFIRMED); contribution.setConfirmedAt(Instant.now());
         CampaignReward reward = contribution.getReward();
         if (reward != null) reward.setClaimedQuantity(reward.getClaimedQuantity() + 1);
+    }
+
+    private void failForCapacity(Contribution contribution, Payment payment,
+                                 ContributionCapacityException exception) {
+        payment.setStatus(PaymentStatus.FAILED);
+        payment.setFailure(exception.getReason(), "El aporte ya no cabe en el restante de la campaña.");
+        if (contribution.getStatus() != ContributionStatus.CONFIRMED
+                && contribution.getStatus() != ContributionStatus.REFUNDED) {
+            contribution.setStatus(ContributionStatus.FAILED);
+        }
     }
 
     private Campaign activeCampaign(UUID id) {

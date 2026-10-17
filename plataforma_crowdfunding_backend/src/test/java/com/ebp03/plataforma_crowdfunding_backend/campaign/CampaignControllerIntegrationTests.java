@@ -384,16 +384,28 @@ class CampaignControllerIntegrationTests {
 
                 String payload = "{\"event\":\"late-success\"}";
                 UUID paymentId = extractPaymentId(failed.getResponse().getContentAsString());
+                String providerEventId = "capacity-webhook-event";
+                String eventType = "payment.succeeded";
+                String paymentStatus = "succeeded";
                 mockMvc.perform(post("/api/payments/webhook")
-                                .header("X-Payment-Signature", contributionService.sign(payload))
-                                .header("X-Provider-Event-Id", "capacity-webhook-event")
+                                .header("X-Payment-Signature", contributionService.sign(
+                                        payload, providerEventId, paymentId, eventType, paymentStatus))
+                                .header("X-Provider-Event-Id", providerEventId)
                                 .param("paymentId", paymentId.toString())
-                                .param("eventType", "payment.succeeded")
-                                .param("status", "succeeded")
+                                .param("eventType", eventType)
+                                .param("status", paymentStatus)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(payload))
                         .andExpect(status().isBadRequest())
                         .andExpect(jsonPath("$.code").value("CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT"));
+
+                mockMvc.perform(get("/api/contributions/{contributionId}", failedId).cookie(sponsor))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.status").value("FAILED"))
+                        .andExpect(jsonPath("$.payment.status").value("FAILED"));
+                mockMvc.perform(get("/api/campaigns/{campaignId}/progress", campaign.getId()))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.raisedAmount").value(30.0));
             }
 
         @Test

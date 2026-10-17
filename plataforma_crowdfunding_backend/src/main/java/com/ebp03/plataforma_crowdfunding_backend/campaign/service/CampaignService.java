@@ -275,24 +275,6 @@ public class CampaignService {
     }
 
     @Transactional
-    public CampaignUpdateResponse createCampaignUpdate(User creator, UUID campaignId, CampaignUpdateRequest request) {
-        requireActiveCreator(creator);
-        Campaign campaign = campaignRepository.findById(campaignId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
-        if (!campaign.getCreatorId().equals(creator.getId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tienes permisos para actualizar esta campaña");
-        }
-        if (request.title() == null || request.title().isBlank() || request.body() == null || request.body().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El título y la descripción son obligatorios");
-        }
-
-        CampaignUpdate update = new CampaignUpdate(campaign, creator.getId(), request.title().trim(), request.body().trim());
-        campaign.addUpdate(update);
-        campaignRepository.save(campaign);
-        return CampaignUpdateResponse.from(update);
-    }
-
-    @Transactional
     public void closeExpiredCampaigns() {
         List<Campaign> campaigns = campaignRepository.findAll();
         Instant now = Instant.now();
