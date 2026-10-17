@@ -5,6 +5,7 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.security.SessionAuthenticationFilter;
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.AuthService;
 import com.ebp03.plataforma_crowdfunding_backend.auth.service.SessionService;
+import com.ebp03.plataforma_crowdfunding_backend.auth.service.UserProfileService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -17,6 +18,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,16 +29,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
     private final AuthService authService;
     private final SessionService sessionService;
+    private final UserProfileService userProfileService;
     private final String cookieName;
     private final boolean cookieSecure;
     private final String cookieSameSite;
 
-    public AuthController(AuthService authService, SessionService sessionService,
+    public AuthController(AuthService authService, SessionService sessionService, UserProfileService userProfileService,
                           @Value("${app.auth.session-cookie-name:AUTH_SESSION}") String cookieName,
                           @Value("${app.auth.cookie-secure:false}") boolean cookieSecure,
                           @Value("${app.auth.cookie-same-site:Lax}") String cookieSameSite) {
         this.authService = authService;
         this.sessionService = sessionService;
+        this.userProfileService = userProfileService;
         this.cookieName = cookieName;
         this.cookieSecure = cookieSecure;
         this.cookieSameSite = cookieSameSite;
@@ -69,7 +73,15 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public PublicUser me(@AuthenticationPrincipal User user) { return PublicUser.from(user); }
+    public PublicUser me(@AuthenticationPrincipal User user) {
+        return userProfileService.getCurrentUser(user);
+    }
+
+    @PatchMapping("/me")
+    public UpdateUserProfileResponse updateMe(@AuthenticationPrincipal User user,
+                                              @Valid @RequestBody UpdateUserProfileRequest request) {
+        return new UpdateUserProfileResponse("Datos actualizados", userProfileService.updateCurrentUser(user, request));
+    }
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response) {

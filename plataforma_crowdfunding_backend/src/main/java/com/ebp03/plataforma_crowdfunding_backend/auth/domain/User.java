@@ -77,5 +77,7 @@ public class User {
     public UserRole getRole() { return role; }
     public VerificationStatus getVerificationStatus() { return verificationStatus; }
     public AccountStatus getStatus() { return status; }
+    public void updateName(String name) { this.name = name; }
     public void setVerificationStatus(VerificationStatus verificationStatus) { this.verificationStatus = verificationStatus; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 }

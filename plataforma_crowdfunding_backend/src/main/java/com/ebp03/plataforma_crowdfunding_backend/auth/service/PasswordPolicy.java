@@ -10,6 +10,7 @@ public class PasswordPolicy {
         List<String> missing = new ArrayList<>();
         if (password == null || password.length() < 8) missing.add("MINIMUM_LENGTH_8");
         if (password == null || !password.chars().anyMatch(Character::isUpperCase)) missing.add("ONE_UPPERCASE_LETTER");
+        if (password == null || !password.chars().anyMatch(Character::isLowerCase)) missing.add("ONE_LOWERCASE_LETTER");
         if (password == null || !password.chars().anyMatch(Character::isDigit)) missing.add("ONE_NUMBER");
         if (password == null || password.chars().allMatch(Character::isLetterOrDigit)) missing.add("ONE_SYMBOL");
         return missing;

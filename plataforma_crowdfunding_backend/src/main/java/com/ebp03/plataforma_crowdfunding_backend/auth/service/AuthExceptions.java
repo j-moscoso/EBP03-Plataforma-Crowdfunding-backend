@@ -15,4 +15,6 @@ public final class AuthExceptions {
         public WeakPasswordException(List<String> requirements) { this.requirements = requirements; }
         public List<String> getRequirements() { return requirements; }
     }
+    public static class InvalidPasswordResetTokenException extends RuntimeException { }
+    public static class SamePasswordException extends RuntimeException { }
 }
