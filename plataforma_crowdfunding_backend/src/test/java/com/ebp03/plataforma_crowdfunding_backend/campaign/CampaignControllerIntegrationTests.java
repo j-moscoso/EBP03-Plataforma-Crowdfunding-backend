@@ -16,12 +16,21 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignReward;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignDraft;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.DraftReward;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignDraftRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.service.ContributionService;
 import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -30,6 +39,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -45,8 +55,14 @@ class CampaignControllerIntegrationTests {
     @Autowired
     private CampaignRepository campaignRepository;
 
+        @Autowired
+        private CampaignDraftRepository campaignDraftRepository;
+
     @Autowired
     private ContributionRepository contributionRepository;
+
+        @Autowired
+        private ContributionService contributionService;
 
     @Test
     void creatorCanCreateAndUpdateDraftWithRewards() throws Exception {
@@ -145,6 +161,110 @@ class CampaignControllerIntegrationTests {
                 .andExpect(jsonPath("$.progress.secondsRemaining").exists());
     }
 
+    @Test
+    void pendingCreatorCanCreateAndPublishCampaign() throws Exception {
+        Cookie creator = registerCreator("creator.pending@test.local");
+
+        String draft = mockMvc.perform(post("/api/drafts")
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Proyecto pendiente\",\"description\":\"Campaña disponible para el MVP\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Educación\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(creator))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void sponsorCannotCreateOrPublishCampaign() throws Exception {
+        Cookie sponsor = registerSponsor("sponsor.campaign@test.local");
+        Cookie creator = registerCreator("creator.owner@test.local");
+        String draft = mockMvc.perform(post("/api/drafts")
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Proyecto\",\"description\":\"Descripción\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Arte\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/drafts")
+                        .cookie(sponsor)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"No permitido\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Arte\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(sponsor))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void creatorOnlySeesOwnCampaignsAndPrivateEndpointRequiresCreator() throws Exception {
+        Cookie creatorA = registerCreator("creator.mine.a@test.local");
+        Cookie creatorB = registerCreator("creator.mine.b@test.local");
+        User userA = userRepository.findByEmail("creator.mine.a@test.local").orElseThrow();
+        User userB = userRepository.findByEmail("creator.mine.b@test.local").orElseThrow();
+        campaignRepository.save(new Campaign(userA.getId(), "Campaña A", "A", new BigDecimal("100.00"),
+                Instant.now().plusSeconds(3600), "Arte", null, CampaignStatus.ACTIVE));
+        campaignRepository.save(new Campaign(userB.getId(), "Campaña B", "B", new BigDecimal("100.00"),
+                Instant.now().plusSeconds(3600), "Arte", null, CampaignStatus.ACTIVE));
+
+        mockMvc.perform(get("/api/campaigns/mine").cookie(creatorA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("Campaña A"));
+        mockMvc.perform(get("/api/campaigns/mine").cookie(creatorB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("Campaña B"));
+        mockMvc.perform(get("/api/campaigns/mine")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/campaigns/mine").cookie(registerSponsor("sponsor.mine@test.local")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void rewardMinimumCannotExceedGoalOnCreateUpdateOrPublish() throws Exception {
+        Cookie creator = registerCreator("creator.reward-rule@test.local");
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"minimumAmount\":101}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"))
+                .andExpect(jsonPath("$.message").value("El monto mínimo de la recompensa no puede superar la meta de la campaña."));
+
+        String draftId = extractId(mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"minimumAmount\":50}]}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        mockMvc.perform(put("/api/drafts/{draftId}", draftId).cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":40}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
+        mockMvc.perform(get("/api/drafts/{draftId}", draftId).cookie(creator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.goalAmount").value(100.0));
+
+        User user = userRepository.findByEmail("creator.reward-rule@test.local").orElseThrow();
+        CampaignDraft invalidDraft = new CampaignDraft(user.getId(), "Invalido", "Prueba", new BigDecimal("50.00"),
+                30, "Arte", null);
+        invalidDraft.setRewards(java.util.List.of(new DraftReward(invalidDraft, "Kit", "", new BigDecimal("51.00"), 0)));
+        invalidDraft = campaignDraftRepository.save(invalidDraft);
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", invalidDraft.getId()).cookie(creator))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
+        mockMvc.perform(get("/api/drafts/{draftId}", invalidDraft.getId()).cookie(creator))
+                .andExpect(status().isOk());
+    }
+
+        @Test
+        void unauthenticatedUserCannotCreateCampaign() throws Exception {
+                mockMvc.perform(post("/api/drafts")
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content("{\"title\":\"No permitido\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Arte\"}"))
+                                .andExpect(status().isUnauthorized());
+        }
+
         @Test
         void placeholderCampaignIdReturnsReadableValidationError() throws Exception {
                 mockMvc.perform(get("/api/campaigns/{campaignId}", "{campaignId}"))
@@ -199,6 +319,135 @@ class CampaignControllerIntegrationTests {
                         .andExpect(jsonPath("$.sponsorsCount").value(1));
         }
 
+            @Test
+            void contributionCannotExceedRemainingAndExactRemainingIsAccepted() throws Exception {
+                User creator = saveCreator("creator.capacity@test.local");
+                Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad", "Prueba", new BigDecimal("100.00"),
+                        Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                Cookie sponsor = registerSponsor("sponsor.capacity@test.local");
+
+                postContribution(sponsor, campaign.getId(), "capacity-40", 40, "sim_success")
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                postContribution(sponsor, campaign.getId(), "capacity-60", 60, "sim_success")
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                postContribution(sponsor, campaign.getId(), "capacity-1", 1, "sim_success")
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.code").value("CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT"));
+                mockMvc.perform(get("/api/campaigns/{campaignId}/progress", campaign.getId()))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.raisedAmount").value(100.0))
+                        .andExpect(jsonPath("$.remainingAmount").value(0.0));
+            }
+
+            @Test
+            void contributionWithoutConfirmedAmountsCannotExceedGoalAndPendingFailedDoNotReduceRemaining() throws Exception {
+                User creator = saveCreator("creator.capacity.empty@test.local");
+                Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad vacía", "Prueba", new BigDecimal("100.00"),
+                        Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                Cookie sponsor = registerSponsor("sponsor.capacity.empty@test.local");
+
+                postContribution(sponsor, campaign.getId(), "capacity-too-much", 101, "sim_success")
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.code").value("CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT"));
+
+                User sponsorUser = userRepository.findByEmail("sponsor.capacity.empty@test.local").orElseThrow();
+                contributionRepository.save(new Contribution(campaign, sponsorUser.getId(), new BigDecimal("80.00"), "USD", ContributionStatus.PENDING));
+                contributionRepository.save(new Contribution(campaign, sponsorUser.getId(), new BigDecimal("80.00"), "USD", ContributionStatus.FAILED));
+                postContribution(sponsor, campaign.getId(), "capacity-after-non-confirmed", 100, "sim_success")
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+            }
+
+            @Test
+            void retryAndWebhookCannotConfirmContributionAfterRemainingWasConsumed() throws Exception {
+                User creator = saveCreator("creator.capacity.retry@test.local");
+                Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad retry", "Prueba", new BigDecimal("100.00"),
+                        Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                Cookie sponsor = registerSponsor("sponsor.capacity.retry@test.local");
+
+                MvcResult failed = postContribution(sponsor, campaign.getId(), "capacity-failed", 80, "sim_failure")
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("FAILED"))
+                        .andReturn();
+                postContribution(sponsor, campaign.getId(), "capacity-consume", 30, "sim_success")
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                String failedId = extractId(failed.getResponse().getContentAsString());
+                mockMvc.perform(post("/api/contributions/{contributionId}/retry", failedId)
+                                .cookie(sponsor).header("Idempotency-Key", "capacity-retry")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"paymentMethodId\":\"sim_success\"}"))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.code").value("CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT"));
+
+                String payload = "{\"event\":\"late-success\"}";
+                UUID paymentId = extractPaymentId(failed.getResponse().getContentAsString());
+                mockMvc.perform(post("/api/payments/webhook")
+                                .header("X-Payment-Signature", contributionService.sign(payload))
+                                .header("X-Provider-Event-Id", "capacity-webhook-event")
+                                .param("paymentId", paymentId.toString())
+                                .param("eventType", "payment.succeeded")
+                                .param("status", "succeeded")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(payload))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.code").value("CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT"));
+            }
+
+        @Test
+        void concurrentContributionsCannotConfirmMoreThanCampaignGoal() throws Exception {
+                User creator = saveCreator("creator.capacity.concurrent@test.local");
+                Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad concurrente", "Prueba", new BigDecimal("100.00"),
+                                Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                Cookie sponsorA = registerSponsor("sponsor.capacity.concurrent.a@test.local");
+                Cookie sponsorB = registerSponsor("sponsor.capacity.concurrent.b@test.local");
+                CountDownLatch start = new CountDownLatch(1);
+                ExecutorService executor = Executors.newFixedThreadPool(2);
+                try {
+                        Future<MvcResult> first = executor.submit(() -> {
+                                start.await();
+                                return postContribution(sponsorA, campaign.getId(), "capacity-concurrent-a", 60, "sim_success").andReturn();
+                        });
+                        Future<MvcResult> second = executor.submit(() -> {
+                                start.await();
+                                return postContribution(sponsorB, campaign.getId(), "capacity-concurrent-b", 60, "sim_success").andReturn();
+                        });
+                        start.countDown();
+                        int firstStatus = first.get(10, TimeUnit.SECONDS).getResponse().getStatus();
+                        int secondStatus = second.get(10, TimeUnit.SECONDS).getResponse().getStatus();
+                        org.assertj.core.api.Assertions.assertThat(java.util.List.of(firstStatus, secondStatus))
+                                        .containsExactlyInAnyOrder(201, 400);
+                } finally {
+                        executor.shutdownNow();
+                }
+                mockMvc.perform(get("/api/campaigns/{campaignId}/progress", campaign.getId()))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.raisedAmount").value(60.0))
+                                .andExpect(jsonPath("$.remainingAmount").value(40.0));
+        }
+
+        private ResultActions postContribution(Cookie sponsor, UUID campaignId, String key, int amount, String paymentMethodId) throws Exception {
+                return mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaignId)
+                        .cookie(sponsor).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"amount\":" + amount + ",\"currency\":\"USD\",\"paymentMethodId\":\"" + paymentMethodId + "\"}"));
+            }
+
+            private User saveCreator(String email) {
+                return userRepository.save(new User("Creator", email, "hashed", UserRole.CREATOR, VerificationStatus.VERIFIED,
+                        com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus.ACTIVE));
+            }
+
+            private UUID extractPaymentId(String json) {
+                String marker = "\"payment\":{\"id\":\"";
+                int start = json.indexOf(marker);
+                if (start < 0) throw new IllegalArgumentException("No payment id found in: " + json);
+                int idStart = start + marker.length();
+                return UUID.fromString(json.substring(idStart, idStart + 36));
+            }
+
     private Cookie registerCreator(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -206,9 +455,6 @@ class CampaignControllerIntegrationTests {
                 .andExpect(status().isCreated())
                 .andReturn();
 
-        User creator = userRepository.findByEmail(email).orElseThrow();
-        creator.setVerificationStatus(VerificationStatus.VERIFIED);
-        userRepository.save(creator);
         return result.getResponse().getCookie("AUTH_SESSION");
     }
 

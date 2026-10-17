@@ -3,7 +3,7 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.service;
 import com.ebp03.plataforma_crowdfunding_backend.auth.api.PublicUser;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
-import com.ebp03.plataforma_crowdfunding_backend.auth.domain.VerificationStatus;
+import com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignDraft;
@@ -69,7 +69,7 @@ public class CampaignService {
 
     @Transactional
     public DraftResponse createDraft(User creator, DraftCreateRequest request) {
-        requireVerifiedCreator(creator);
+        requireActiveCreator(creator);
         List<FieldError> errors = validateDraftFields(request.goalAmount(), request.durationDays(), request.category(), request.rewards());
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
 
@@ -96,14 +96,14 @@ public class CampaignService {
 
     @Transactional(readOnly = true)
     public PageResponse<DraftResponse> listDrafts(User creator, int page, int pageSize) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         Pageable pageable = PageRequest.of(page, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt"));
         return PageResponse.from(campaignDraftRepository.findByCreatorId(creator.getId(), pageable).map(DraftResponse::from), page, pageSize);
     }
 
     @Transactional(readOnly = true)
     public DraftResponse getDraft(User creator, UUID draftId) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -114,7 +114,7 @@ public class CampaignService {
 
     @Transactional
     public DraftResponse updateDraft(User creator, UUID draftId, DraftUpdateRequest request) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -155,7 +155,7 @@ public class CampaignService {
 
     @Transactional
     public void deleteDraft(User creator, UUID draftId) {
-        requireCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -166,7 +166,7 @@ public class CampaignService {
 
     @Transactional
     public CampaignDetailResponse publishDraft(User creator, UUID draftId) {
-        requireVerifiedCreator(creator);
+        requireActiveCreator(creator);
         CampaignDraft draft = campaignDraftRepository.findById(draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft no encontrado"));
         if (!draft.getCreatorId().equals(creator.getId())) {
@@ -237,6 +237,26 @@ public class CampaignService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<CampaignSummaryResponse> listMyCampaigns(User creator, Integer page, Integer pageSize, String status) {
+        requireActiveCreator(creator);
+        int safePage = Math.max(0, Objects.requireNonNullElse(page, 0));
+        int safeSize = Math.max(1, Math.min(50, Objects.requireNonNullElse(pageSize, 10)));
+        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "publishedAt"));
+        Page<Campaign> campaigns;
+        if (status == null || status.isBlank()) {
+            campaigns = campaignRepository.findByCreatorId(creator.getId(), pageable);
+        } else {
+            try {
+                campaigns = campaignRepository.findByCreatorIdAndStatus(
+                        creator.getId(), CampaignStatus.valueOf(status.trim().toUpperCase()), pageable);
+            } catch (IllegalArgumentException exception) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado de campaña inválido");
+            }
+        }
+        return PageResponse.from(campaigns.map(this::campaignSummary), safePage, safeSize);
+    }
+
+    @Transactional(readOnly = true)
     public CampaignDetailResponse getCampaign(UUID campaignId) {
         closeExpiredCampaigns();
         Campaign campaign = campaignRepository.findById(campaignId)
@@ -255,6 +275,24 @@ public class CampaignService {
     }
 
     @Transactional
+    public CampaignUpdateResponse createCampaignUpdate(User creator, UUID campaignId, CampaignUpdateRequest request) {
+        requireActiveCreator(creator);
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
+        if (!campaign.getCreatorId().equals(creator.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tienes permisos para actualizar esta campaña");
+        }
+        if (request.title() == null || request.title().isBlank() || request.body() == null || request.body().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El título y la descripción son obligatorios");
+        }
+
+        CampaignUpdate update = new CampaignUpdate(campaign, creator.getId(), request.title().trim(), request.body().trim());
+        campaign.addUpdate(update);
+        campaignRepository.save(campaign);
+        return CampaignUpdateResponse.from(update);
+    }
+
+    @Transactional
     public void closeExpiredCampaigns() {
         List<Campaign> campaigns = campaignRepository.findAll();
         Instant now = Instant.now();
@@ -269,16 +307,9 @@ public class CampaignService {
         }
     }
 
-    private void requireCreator(User user) {
-        if (user == null || user.getRole() != UserRole.CREATOR) {
+    private void requireActiveCreator(User user) {
+        if (user == null || user.getRole() != UserRole.CREATOR || user.getStatus() != AccountStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Solo los creadores pueden acceder a esta operación");
-        }
-    }
-
-    private void requireVerifiedCreator(User user) {
-        requireCreator(user);
-        if (user.getVerificationStatus() != VerificationStatus.VERIFIED) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "El creador debe estar verificado");
         }
     }
 
@@ -416,7 +447,7 @@ public class CampaignService {
         List<FieldError> errors = new ArrayList<>();
         if (goalAmount == null) {
             errors.add(new FieldError("goalAmount", "REQUIRED"));
-        } else if (goalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+        } else if (!validMoney(goalAmount)) {
             errors.add(new FieldError("goalAmount", "INVALID"));
         }
 
@@ -435,15 +466,30 @@ public class CampaignService {
         if (rewards != null) {
             for (int index = 0; index < rewards.size(); index++) {
                 RewardRequest reward = rewards.get(index);
+                if (reward == null) {
+                    errors.add(new FieldError("rewards[" + index + "]", "INVALID"));
+                    continue;
+                }
                 if (reward.title() == null || reward.title().isBlank()) {
                     errors.add(new FieldError("rewards[" + index + "].title", "REQUIRED"));
                 }
-                if (reward.minimumAmount() == null || reward.minimumAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                if (!validMoney(reward.minimumAmount())) {
                     errors.add(new FieldError("rewards[" + index + "].minimumAmount", "INVALID"));
+                } else if (goalAmount != null && reward.minimumAmount().compareTo(goalAmount) > 0) {
+                    errors.add(new FieldError(
+                            "rewards[" + index + "].minimumAmount",
+                            "MINIMUM_AMOUNT_EXCEEDS_GOAL",
+                            "El monto mínimo de la recompensa no puede superar la meta de la campaña."));
                 }
             }
         }
         return errors;
+    }
+
+    private boolean validMoney(BigDecimal amount) {
+        return amount != null
+                && amount.compareTo(BigDecimal.ZERO) > 0
+                && amount.scale() <= 2;
     }
 
     private List<RewardRequest> convertRewards(List<DraftReward> rewards) {
@@ -566,7 +612,11 @@ public class CampaignService {
         }
     }
 
-    public record FieldError(String field, String code) { }
+    public record FieldError(String field, String code, String message) {
+        public FieldError(String field, String code) {
+            this(field, code, code);
+        }
+    }
 
     public static class FieldValidationException extends RuntimeException {
         private final List<FieldError> errors;

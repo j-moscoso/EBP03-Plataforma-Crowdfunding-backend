@@ -37,6 +37,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/social", "/api/auth/logout",
                                 "/api/auth/password-reset/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/campaigns/mine").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/campaigns", "/api/campaigns/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(sessionAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

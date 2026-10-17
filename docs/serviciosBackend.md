@@ -8,6 +8,8 @@ La autenticación usa sesiones opacas: el token completo solo viaja en una cooki
 
 Base URL local: `http://localhost:8080`
 
+`verificationStatus` se conserva en el modelo y en las respuestas públicas, pero queda reservado para la futura historia de verificación. En este MVP, una cuenta `creator` activa puede crear, editar y publicar campañas aunque su estado sea `pending`.
+
 ## Modelo público
 
 ```json
