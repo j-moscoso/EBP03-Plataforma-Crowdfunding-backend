@@ -42,6 +42,9 @@ public class CampaignDraft {
     @Column(name = "media_url", length = 500)
     private String mediaUrl;
 
+    @Column(length = 3)
+    private String currency;
+
     @Column(name = "completion_percentage", nullable = false)
     private Integer completionPercentage;
 
@@ -62,6 +65,11 @@ public class CampaignDraft {
 
     public CampaignDraft(UUID creatorId, String title, String description, BigDecimal goalAmount,
                         Integer durationDays, String category, String mediaUrl) {
+        this(creatorId, title, description, goalAmount, durationDays, category, mediaUrl, null);
+    }
+
+    public CampaignDraft(UUID creatorId, String title, String description, BigDecimal goalAmount,
+                        Integer durationDays, String category, String mediaUrl, String currency) {
         this.id = UUID.randomUUID();
         this.creatorId = creatorId;
         this.title = title;
@@ -70,6 +78,7 @@ public class CampaignDraft {
         this.durationDays = durationDays;
         this.category = category;
         this.mediaUrl = mediaUrl;
+        this.currency = currency;
         this.completionPercentage = 0;
         this.savedAt = Instant.now();
     }
@@ -97,6 +106,7 @@ public class CampaignDraft {
     public Integer getDurationDays() { return durationDays; }
     public String getCategory() { return category; }
     public String getMediaUrl() { return mediaUrl; }
+    public String getCurrency() { return currency; }
     public Integer getCompletionPercentage() { return completionPercentage; }
     public Instant getSavedAt() { return savedAt; }
     public Instant getCreatedAt() { return createdAt; }
@@ -109,6 +119,7 @@ public class CampaignDraft {
     public void setDurationDays(Integer durationDays) { this.durationDays = durationDays; }
     public void setCategory(String category) { this.category = category; }
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
+    public void setCurrency(String currency) { this.currency = currency; }
     public void setCompletionPercentage(Integer completionPercentage) { this.completionPercentage = completionPercentage; }
     public void setSavedAt(Instant savedAt) { this.savedAt = savedAt; }
     public void setRewards(List<DraftReward> rewards) { this.rewards.clear(); if (rewards != null) { this.rewards.addAll(rewards); for (DraftReward reward : this.rewards) { reward.setDraft(this); } } }

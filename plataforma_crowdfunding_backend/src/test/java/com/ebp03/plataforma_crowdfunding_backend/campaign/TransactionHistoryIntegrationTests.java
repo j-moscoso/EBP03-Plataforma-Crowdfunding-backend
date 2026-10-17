@@ -251,7 +251,7 @@ class TransactionHistoryIntegrationTests {
     private Campaign campaign(User creator, String title) {
         return campaignRepository.saveAndFlush(new Campaign(
                 creator.getId(), title, "Descripción de prueba", new BigDecimal("1000.00"),
-                Instant.now().plusSeconds(86400), "Comunidad", null, CampaignStatus.ACTIVE));
+                Instant.now().plusSeconds(86400), "Comunidad", null, "USD", CampaignStatus.ACTIVE));
     }
 
     private Contribution contribution(Campaign campaign, User sponsor, String amount,

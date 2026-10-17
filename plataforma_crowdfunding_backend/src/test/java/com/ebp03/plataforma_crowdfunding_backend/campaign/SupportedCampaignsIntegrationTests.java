@@ -177,6 +177,12 @@ class SupportedCampaignsIntegrationTests {
                         .param("pageSize", "50"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(states.length))
+                .andExpect(jsonPath("$.omittedCampaigns[0].campaignId").value(mixed.getId().toString()))
+                .andExpect(jsonPath("$.omittedCampaigns[0].reasonCode").value("MIXED_CONFIRMED_CURRENCIES"))
+                .andExpect(jsonPath("$.omittedCampaigns[0].currencies[0]").value("EUR"))
+                .andExpect(jsonPath("$.omittedCampaigns[0].currencies[1]").value("USD"))
+                .andExpect(jsonPath("$.warnings[0].code").value("SUPPORTED_CAMPAIGNS_OMITTED"))
+                .andExpect(jsonPath("$.warnings[0].affectedCampaignCount").value(1))
                 .andReturn();
         String response = result.getResponse().getContentAsString();
         org.hamcrest.MatcherAssert.assertThat(response,
@@ -188,7 +194,7 @@ class SupportedCampaignsIntegrationTests {
                     org.hamcrest.Matchers.containsString("\"statusCode\":\"" + states[index].name() + "\""));
         }
         org.hamcrest.MatcherAssert.assertThat(response,
-                org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(mixed.getId().toString())));
+                org.hamcrest.Matchers.containsString(mixed.getId().toString()));
     }
 
     @Test
@@ -226,7 +232,7 @@ class SupportedCampaignsIntegrationTests {
     private Campaign campaign(User creator, String title, String goal, CampaignStatus state, String imageUrl) {
         return campaignRepository.saveAndFlush(new Campaign(
                 creator.getId(), title, "Descripción de prueba", new BigDecimal(goal),
-                Instant.now().plusSeconds(86400), "Comunidad", imageUrl, state));
+                Instant.now().plusSeconds(86400), "Comunidad", imageUrl, "USD", state));
     }
 
     private void contribution(Campaign campaign, User sponsor, String amount, String currency,

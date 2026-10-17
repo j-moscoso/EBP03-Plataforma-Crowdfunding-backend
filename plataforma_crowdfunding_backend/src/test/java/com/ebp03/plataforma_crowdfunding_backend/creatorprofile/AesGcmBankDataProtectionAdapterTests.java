@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.service.AesGcmBankDataProtectionAdapter;
+import java.util.Base64;
 import org.junit.jupiter.api.Test;
 
 class AesGcmBankDataProtectionAdapterTests {
@@ -33,8 +34,9 @@ class AesGcmBankDataProtectionAdapterTests {
     void rejectsCiphertextTampering() {
         var adapter = new AesGcmBankDataProtectionAdapter(KEY);
         String encrypted = adapter.encrypt("1234567890");
-        String tampered = encrypted.substring(0, encrypted.length() - 1)
-                + (encrypted.endsWith("A") ? "B" : "A");
+        byte[] payload = Base64.getUrlDecoder().decode(encrypted.substring(3));
+        payload[payload.length - 1] ^= 0x01;
+        String tampered = "v1:" + Base64.getUrlEncoder().withoutPadding().encodeToString(payload);
 
         assertThrows(IllegalStateException.class, () -> adapter.mask(tampered, 4));
     }

@@ -53,7 +53,7 @@ public class ContributionService {
         Campaign campaign = lockedActiveCampaign(campaignId);
         validateAmount(request.amount(), request.currency());
         String currency = request.currency().trim().toUpperCase(Locale.ROOT);
-        requireCampaignCurrency(campaign.getId(), currency);
+        requireCampaignCurrency(campaign, currency);
         validateRemaining(campaign, request.amount());
         CampaignReward reward = findReward(campaign, request.rewardId());
         if (reward != null) {
@@ -80,7 +80,7 @@ public class ContributionService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "CONTRIBUTION_ALREADY_REFUNDED");
         }
         Campaign campaign = lockedActiveCampaign(contribution.getCampaign().getId());
-        requireCampaignCurrency(campaign.getId(), contribution.getCurrency());
+        requireCampaignCurrency(campaign, contribution.getCurrency());
         validateRemaining(campaign, contribution.getAmount());
         if (contribution.getReward() != null && contribution.getReward().getQuantity() != null
                 && contribution.getReward().getClaimedQuantity() >= contribution.getReward().getQuantity()) bad("La recompensa no está disponible");
@@ -268,8 +268,11 @@ public class ContributionService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_NOT_ACTIVE");
         return campaign;
     }
-    private void requireCampaignCurrency(UUID campaignId, String currency) {
-        if (contributions.existsWithDifferentCurrency(campaignId, currency)) {
+    private void requireCampaignCurrency(Campaign campaign, String currency) {
+        if (campaign.getCurrency() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_CURRENCY_UNAVAILABLE");
+        }
+        if (!campaign.getCurrency().equalsIgnoreCase(currency)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "CAMPAIGN_CURRENCY_MISMATCH");
         }
     }

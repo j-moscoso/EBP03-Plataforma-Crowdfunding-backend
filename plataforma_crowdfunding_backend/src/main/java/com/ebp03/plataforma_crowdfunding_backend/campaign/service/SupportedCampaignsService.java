@@ -5,11 +5,16 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SupportedCampaignProjection;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SupportedCampaignCurrencyProjection;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +56,13 @@ public class SupportedCampaignsService {
 
         Page<SupportedCampaignProjection> result = contributions.findSupportedCampaigns(
                 authenticatedUser.getId(), PageRequest.of(page, pageSize));
+        List<OmittedCampaignResponse> omittedCampaigns = findOmittedCampaigns(authenticatedUser.getId());
+        List<WarningResponse> warnings = omittedCampaigns.isEmpty()
+                ? List.of()
+                : List.of(new WarningResponse(
+                        "SUPPORTED_CAMPAIGNS_OMITTED",
+                        "Algunas campañas no se muestran porque tienen monedas confirmadas incompatibles.",
+                        omittedCampaigns.size()));
         List<SupportedCampaignResponse> content = result.getContent().stream()
                 .map(this::toResponse)
                 .toList();
@@ -60,7 +72,29 @@ public class SupportedCampaignsService {
                 result.getSize(),
                 result.getTotalElements(),
                 result.getTotalPages(),
-                result.getTotalElements() == 0 ? EMPTY_MESSAGE : null);
+                result.getTotalElements() == 0 && omittedCampaigns.isEmpty() ? EMPTY_MESSAGE : null,
+                omittedCampaigns,
+                warnings);
+    }
+
+    private List<OmittedCampaignResponse> findOmittedCampaigns(UUID sponsorId) {
+        Map<UUID, OmittedCampaignBuilder> grouped = new LinkedHashMap<>();
+        for (SupportedCampaignCurrencyProjection row : contributions.findSupportedCampaignCurrencies(sponsorId)) {
+            UUID campaignId = UUID.fromString(row.getCampaignId());
+            grouped.computeIfAbsent(campaignId, ignored -> new OmittedCampaignBuilder(row.getTitle()))
+                    .currencies.add(row.getCurrency().toUpperCase(java.util.Locale.ROOT));
+        }
+        List<OmittedCampaignResponse> omitted = new ArrayList<>();
+        for (Map.Entry<UUID, OmittedCampaignBuilder> entry : grouped.entrySet()) {
+            if (entry.getValue().currencies.size() > 1) {
+                omitted.add(new OmittedCampaignResponse(
+                        entry.getKey(),
+                        entry.getValue().title,
+                        "MIXED_CONFIRMED_CURRENCIES",
+                        List.copyOf(entry.getValue().currencies)));
+            }
+        }
+        return omitted;
     }
 
     private SupportedCampaignResponse toResponse(SupportedCampaignProjection projection) {
@@ -122,6 +156,30 @@ public class SupportedCampaignsService {
             int pageSize,
             long totalElements,
             int totalPages,
-            @JsonInclude(JsonInclude.Include.NON_NULL) String emptyMessage) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) String emptyMessage,
+            List<OmittedCampaignResponse> omittedCampaigns,
+            List<WarningResponse> warnings) {
+    }
+
+    public record OmittedCampaignResponse(
+            UUID campaignId,
+            String title,
+            String reasonCode,
+            List<String> currencies) {
+    }
+
+    public record WarningResponse(
+            String code,
+            String message,
+            int affectedCampaignCount) {
+    }
+
+    private static final class OmittedCampaignBuilder {
+        private final String title;
+        private final TreeSet<String> currencies = new TreeSet<>();
+
+        private OmittedCampaignBuilder(String title) {
+            this.title = title;
+        }
     }
 }

@@ -133,7 +133,7 @@ class CampaignControllerIntegrationTests {
         String draft = mockMvc.perform(post("/api/drafts")
                         .cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"Energía verde\",\"description\":\"Campaña de paneles solares\",\"goalAmount\":30000,\"durationDays\":60,\"category\":\"Medio ambiente\",\"mediaUrl\":\"https://example.com/solar.jpg\",\"rewards\":[{\"title\":\"Gracias\",\"minimumAmount\":10},{\"title\":\"Kit\",\"minimumAmount\":50},{\"title\":\"Membresía\",\"minimumAmount\":150}]}"))
+                        .content("{\"title\":\"Energía verde\",\"description\":\"Campaña de paneles solares\",\"goalAmount\":30000,\"durationDays\":60,\"category\":\"Medio ambiente\",\"mediaUrl\":\"https://example.com/solar.jpg\",\"currency\":\"USD\",\"rewards\":[{\"title\":\"Gracias\",\"minimumAmount\":10},{\"title\":\"Kit\",\"minimumAmount\":50},{\"title\":\"Membresía\",\"minimumAmount\":150}]}"))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         String draftId = extractId(draft);
@@ -142,6 +142,8 @@ class CampaignControllerIntegrationTests {
                         .cookie(creator))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.currency").value("USD"))
+                .andExpect(jsonPath("$.currencyStatus").value("CONFIGURED"))
                 .andExpect(jsonPath("$.rewards.length()").value(3))
                 .andExpect(jsonPath("$.progress.percentage").exists())
                 .andReturn();
@@ -168,13 +170,41 @@ class CampaignControllerIntegrationTests {
         String draft = mockMvc.perform(post("/api/drafts")
                         .cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"Proyecto pendiente\",\"description\":\"Campaña disponible para el MVP\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Educación\"}"))
+                        .content("{\"title\":\"Proyecto pendiente\",\"description\":\"Campaña disponible para el MVP\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Educación\",\"currency\":\"USD\"}"))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
 
         mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(creator))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void campaignWithoutCurrencyCannotBePublishedOrSupportedForContributions() throws Exception {
+        Cookie creator = registerCreator("creator.currency-required@test.local");
+        String draft = mockMvc.perform(post("/api/drafts")
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Sin moneda\",\"description\":\"Debe configurarse\",\"goalAmount\":1000,\"durationDays\":30,\"category\":\"Educación\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/drafts/{draftId}/publish", extractId(draft)).cookie(creator))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("CAMPAIGN_CURRENCY_REQUIRED"));
+
+        Cookie sponsorSession = registerSponsor("sponsor.currency-required@test.local");
+        Campaign historical = campaignRepository.save(new Campaign(
+                userRepository.findByEmail("creator.currency-required@test.local").orElseThrow().getId(),
+                "Histórica sin moneda", "Revisión pendiente", new BigDecimal("1000.00"),
+                Instant.now().plusSeconds(86400), "Educación", null, CampaignStatus.ACTIVE));
+        mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", historical.getId())
+                        .cookie(sponsorSession)
+                        .header("Idempotency-Key", "currency-unavailable-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":5.00,\"currency\":\"USD\",\"paymentMethodId\":\"sim_success\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CAMPAIGN_CURRENCY_UNAVAILABLE"));
     }
 
     @Test
@@ -276,7 +306,7 @@ class CampaignControllerIntegrationTests {
         @Test
         void contributionIsIdempotentAndFailedPaymentCanBeRetried() throws Exception {
                 User creator = userRepository.save(new User("Campaign creator", "creator.contribution@test.local", "hashed", UserRole.CREATOR, VerificationStatus.VERIFIED, com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus.ACTIVE));
-                Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Aporte test", "Campaña de prueba", new BigDecimal("1000.00"), Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                Campaign campaign =                 campaignRepository.save(new Campaign(creator.getId(), "Aporte test", "Campaña de prueba", new BigDecimal("1000.00"), Instant.now().plusSeconds(86400), "Tecnología", null, "USD", CampaignStatus.ACTIVE));
                 CampaignReward reward = new CampaignReward(campaign, "Kit", "Kit de prueba", new BigDecimal("50.00"), 1, 0);
                 campaign.setRewards(java.util.List.of(reward));
                 campaignRepository.save(campaign);
@@ -323,7 +353,7 @@ class CampaignControllerIntegrationTests {
             void contributionCannotExceedRemainingAndExactRemainingIsAccepted() throws Exception {
                 User creator = saveCreator("creator.capacity@test.local");
                 Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad", "Prueba", new BigDecimal("100.00"),
-                        Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                        Instant.now().plusSeconds(86400), "Tecnología", null, "USD", CampaignStatus.ACTIVE));
                 Cookie sponsor = registerSponsor("sponsor.capacity@test.local");
 
                 postContribution(sponsor, campaign.getId(), "capacity-40", 40, "sim_success")
@@ -345,7 +375,7 @@ class CampaignControllerIntegrationTests {
             void contributionWithoutConfirmedAmountsCannotExceedGoalAndPendingFailedDoNotReduceRemaining() throws Exception {
                 User creator = saveCreator("creator.capacity.empty@test.local");
                 Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad vacía", "Prueba", new BigDecimal("100.00"),
-                        Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                        Instant.now().plusSeconds(86400), "Tecnología", null, "USD", CampaignStatus.ACTIVE));
                 Cookie sponsor = registerSponsor("sponsor.capacity.empty@test.local");
 
                 postContribution(sponsor, campaign.getId(), "capacity-too-much", 101, "sim_success")
@@ -364,7 +394,7 @@ class CampaignControllerIntegrationTests {
             void retryAndWebhookCannotConfirmContributionAfterRemainingWasConsumed() throws Exception {
                 User creator = saveCreator("creator.capacity.retry@test.local");
                 Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad retry", "Prueba", new BigDecimal("100.00"),
-                        Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                        Instant.now().plusSeconds(86400), "Tecnología", null, "USD", CampaignStatus.ACTIVE));
                 Cookie sponsor = registerSponsor("sponsor.capacity.retry@test.local");
 
                 MvcResult failed = postContribution(sponsor, campaign.getId(), "capacity-failed", 80, "sim_failure")
@@ -412,7 +442,7 @@ class CampaignControllerIntegrationTests {
         void concurrentContributionsCannotConfirmMoreThanCampaignGoal() throws Exception {
                 User creator = saveCreator("creator.capacity.concurrent@test.local");
                 Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Capacidad concurrente", "Prueba", new BigDecimal("100.00"),
-                                Instant.now().plusSeconds(86400), "Tecnología", null, CampaignStatus.ACTIVE));
+                                Instant.now().plusSeconds(86400), "Tecnología", null, "USD", CampaignStatus.ACTIVE));
                 Cookie sponsorA = registerSponsor("sponsor.capacity.concurrent.a@test.local");
                 Cookie sponsorB = registerSponsor("sponsor.capacity.concurrent.b@test.local");
                 CountDownLatch start = new CountDownLatch(1);
