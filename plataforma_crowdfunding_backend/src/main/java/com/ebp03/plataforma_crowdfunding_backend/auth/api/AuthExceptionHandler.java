@@ -13,6 +13,7 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.api.UpdateUserProfileReque
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorProfileRequest;
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.service.CreatorProfileValidationException;
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorProfileRequest.UnknownCreatorProfileFieldException;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.api.CampaignUpdatePublicationRequest.UnknownCampaignUpdateFieldException;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -104,11 +105,15 @@ public class AuthExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> unreadableRequest(HttpMessageNotReadableException exception) {
+        UnknownCampaignUpdateFieldException unknownUpdateField = findUnknownCampaignUpdateField(exception);
         UnknownCreatorProfileFieldException unknownCreatorField = findUnknownCreatorProfileField(exception);
         UnknownProfileFieldException unknownField = findUnknownProfileField(exception);
         InvalidProfileFieldTypeException invalidType = findInvalidProfileFieldType(exception);
         List<ValidationErrorDetail> details;
-        if (unknownCreatorField != null) {
+        if (unknownUpdateField != null) {
+            details = List.of(new ValidationErrorDetail(
+                    unknownUpdateField.getField(), "UNKNOWN_FIELD", "El campo no está permitido."));
+        } else if (unknownCreatorField != null) {
             details = List.of(new ValidationErrorDetail(
                     "profile." + unknownCreatorField.getField(), "UNKNOWN_FIELD", "El campo no está permitido."));
         } else if (unknownField != null) {
@@ -129,6 +134,13 @@ public class AuthExceptionHandler {
     private UnknownCreatorProfileFieldException findUnknownCreatorProfileField(Throwable exception) {
         for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
             if (cause instanceof UnknownCreatorProfileFieldException unknownField) return unknownField;
+        }
+        return null;
+    }
+
+    private UnknownCampaignUpdateFieldException findUnknownCampaignUpdateField(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof UnknownCampaignUpdateFieldException unknownField) return unknownField;
         }
         return null;
     }

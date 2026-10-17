@@ -2,6 +2,7 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.api;
 
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignService;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignUpdatePublicationMediator;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -19,9 +20,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 public class CampaignController {
     private final CampaignService campaignService;
+    private final CampaignUpdatePublicationMediator updatePublicationMediator;
 
-    public CampaignController(CampaignService campaignService) {
+    public CampaignController(CampaignService campaignService,
+                              CampaignUpdatePublicationMediator updatePublicationMediator) {
         this.campaignService = campaignService;
+        this.updatePublicationMediator = updatePublicationMediator;
     }
 
     @PostMapping("/drafts")
@@ -81,10 +85,20 @@ public class CampaignController {
         return ResponseEntity.ok(campaignService.getProgress(campaignId));
     }
 
+    @GetMapping("/campaigns/{campaignId}/updates")
+    public ResponseEntity<CampaignUpdateWallResponse> getCampaignUpdates(
+            @PathVariable UUID campaignId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        return ResponseEntity.ok(updatePublicationMediator.getWall(campaignId, page, pageSize));
+    }
+
     @PostMapping("/campaigns/{campaignId}/updates")
-    public ResponseEntity<CampaignService.CampaignUpdateResponse> createUpdate(@AuthenticationPrincipal User creator,
-                                                                             @PathVariable UUID campaignId,
-                                                                             @RequestBody CampaignService.CampaignUpdateRequest request) {
-        return ResponseEntity.status(201).body(campaignService.createCampaignUpdate(creator, campaignId, request));
+    public ResponseEntity<CampaignUpdatePublicationResponse> createUpdate(
+            @AuthenticationPrincipal User creator,
+            @PathVariable UUID campaignId,
+            @RequestBody CampaignUpdatePublicationRequest request) {
+        return ResponseEntity.status(201)
+                .body(updatePublicationMediator.publish(creator, campaignId, request));
     }
 }

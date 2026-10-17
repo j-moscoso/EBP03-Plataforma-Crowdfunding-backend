@@ -4,6 +4,7 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,4 +18,9 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
 
     @Query("select count(distinct c.sponsorId) from Contribution c where c.campaign.id = :campaignId and c.status = :status")
     Long countDistinctSponsorByCampaignIdAndStatus(@Param("campaignId") UUID campaignId, @Param("status") ContributionStatus status);
+    @Query("select distinct c.sponsorId from Contribution c where c.campaign.id = :campaignId and c.status = :status and c.sponsorId <> :creatorId")
+    List<UUID> findDistinctSponsorIdsByCampaignIdAndStatusExcludingCreator(
+            @Param("campaignId") UUID campaignId,
+            @Param("status") ContributionStatus status,
+            @Param("creatorId") UUID creatorId);
 }

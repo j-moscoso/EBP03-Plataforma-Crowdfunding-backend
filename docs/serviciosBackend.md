@@ -740,18 +740,29 @@ Respuesta pública `200` con detalle completo de la campaña.
 
 `POST /api/campaigns/{campaignId}/updates`
 
-Requiere sesión autenticada del creador que publicó la campaña.
+Requiere la cookie `AUTH_SESSION` de una cuenta activa con rol `CREATOR`, propietaria de la campaña. Se admiten campañas `ACTIVE` no vencidas y `PUBLISHED`; campañas inexistentes, no propias o cerradas se rechazan.
 
 Body:
 
 ```json
 {
   "title": "Avance del proyecto",
-  "body": "Ya realizamos la primera fase de plantación y seguimos con la segunda etapa."
+  "body": "Ya realizamos la primera fase de plantación y seguimos con la segunda etapa.",
+  "media": [
+    {
+      "mediaType": "IMAGE",
+      "url": "https://cdn.example/avance.jpg",
+      "sortOrder": 0
+    }
+  ]
 }
 ```
 
-Respuesta `201`:
+`title` se recorta, es obligatorio y admite hasta 140 caracteres. `body` se almacena como texto plano (no se interpreta como HTML), es obligatorio y su longitud máxima se configura con `app.campaign-updates.max-body-length` (por defecto 10000, máximo configurable 50000). Se rechazan contenido HTML y esquemas peligrosos. Se permiten hasta 10 medios `IMAGE` o `VIDEO`, con URL absoluta HTTPS; el servidor no descarga ni consulta las URLs. Los campos de autoría, campaña y publicación se determinan en el servidor y los campos JSON desconocidos se rechazan.
+
+La actualización, sus medios y sus notificaciones se persisten en una transacción. Se notifica una sola vez a cada usuario con aporte `CONFIRMED` en la campaña, excluyendo al creador. Aportes `PENDING`, `FAILED` y `REFUNDED` no generan notificaciones. No se usa `Idempotency-Key` para este endpoint.
+
+Respuesta `201` incluye el contenido persistido y `notificationsCreated`:
 
 ```json
 {
@@ -760,9 +771,30 @@ Respuesta `201`:
   "authorId": "UUID",
   "title": "Avance del proyecto",
   "body": "Ya realizamos la primera fase de plantación y seguimos con la segunda etapa.",
-  "publishedAt": "2026-01-01T00:00:00Z"
+  "publishedAt": "2026-01-01T00:00:00Z",
+  "media": [
+    {
+      "id": "UUID",
+      "mediaType": "IMAGE",
+      "url": "https://cdn.example/avance.jpg",
+      "sortOrder": 0
+    }
+  ],
+  "notificationsCreated": 3
 }
 ```
+
+### 10) Consultar muro de campaña
+
+`GET /api/campaigns/{campaignId}/updates?page=0&pageSize=10`
+
+El muro es público para campañas visibles (no `DRAFT`). La respuesta contiene solo actualizaciones de esa campaña, ordenadas por `publishedAt DESC, id DESC`. `page` debe ser no negativo y `pageSize` debe estar entre 1 y 50. La respuesta paginada incluye `content`, `page`, `pageSize`, `totalElements` y `totalPages`; cada actualización incluye sus medios ordenados.
+
+### 11) Consultar notificaciones propias
+
+`GET /api/notifications/me?page=0&pageSize=20&unreadOnly=false`
+
+Requiere sesión autenticada. El servidor filtra exclusivamente por el usuario de `AUTH_SESSION`, ordena por fecha descendente y permite solicitar solo las no leídas. No se acepta un destinatario proporcionado por el cliente.
 
 ## Datos de muestra generados por el seed
 
@@ -818,7 +850,7 @@ Desde `plataforma_crowdfunding_backend`:
 .\mvnw.cmd spring-boot:run
 ```
 
-Las migraciones `V1__create_auth_tables.sql`, `V2__campaign_tables.sql` y `V3__contribution_payments.sql` se ejecutan al arrancar. Para PostgreSQL se configura `SUPABASE_DB_URL` (o una URL JDBC equivalente); para producción usar `AUTH_COOKIE_SECURE=true`, HTTPS, `PAYMENT_PLATFORM_FEE_RATE` y un `PAYMENT_WEBHOOK_SECRET` real. Durante la validación del proyecto se confirmó que la suite ejecuta correctamente con `Tests run: 14, Failures: 0, Errors: 0, Skipped: 0`.
+Las migraciones Flyway se ejecutan al arrancar. Para PostgreSQL se configura `SUPABASE_DB_URL` (o una URL JDBC equivalente); para producción usar `AUTH_COOKIE_SECURE=true`, HTTPS, `PAYMENT_PLATFORM_FEE_RATE` y un `PAYMENT_WEBHOOK_SECRET` real. Ejecutar las pruebas específicas de publicación de actualizaciones con `.\mvnw.cmd "-Dtest=CampaignUpdatePublicationIntegrationTests" test` y la suite de regresión con `.\mvnw.cmd test`.
 
 ## Aportes, pagos y progreso
 
