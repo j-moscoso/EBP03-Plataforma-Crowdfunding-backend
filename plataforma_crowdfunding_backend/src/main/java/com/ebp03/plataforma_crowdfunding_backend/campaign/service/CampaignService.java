@@ -320,7 +320,7 @@ public class CampaignService {
                 campaign.getDeadline(),
                 campaign.getCategory(),
                 campaign.getMediaUrl(),
-                campaign.getCurrency(),
+                canonicalCurrency(campaign.getCurrency()),
                 campaignCurrencyStatus(campaign),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
@@ -341,7 +341,7 @@ public class CampaignService {
                 campaign.getDeadline(),
                 campaign.getCategory(),
                 campaign.getMediaUrl(),
-                campaign.getCurrency(),
+                canonicalCurrency(campaign.getCurrency()),
                 campaignCurrencyStatus(campaign),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
@@ -514,7 +514,11 @@ public class CampaignService {
     }
 
     private String campaignCurrencyStatus(Campaign campaign) {
-        return campaign.getCurrency() == null ? "UNAVAILABLE" : "CONFIGURED";
+        return canonicalCurrency(campaign.getCurrency()) == null ? "UNAVAILABLE" : "CONFIGURED";
+    }
+
+    private String canonicalCurrency(String currency) {
+        return normalizeCurrency(currency);
     }
 
     public record RewardRequest(String title, String description, BigDecimal minimumAmount) { }
