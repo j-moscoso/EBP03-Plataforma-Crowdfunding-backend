@@ -2,6 +2,7 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.service;
 
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignMediaType;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SupportedCampaignProjection;
@@ -110,6 +111,7 @@ public class SupportedCampaignsService {
         return new SupportedCampaignResponse(
                 UUID.fromString(projection.getCampaignId()),
                 projection.getImageUrl(),
+                CampaignMediaType.valueOf(projection.getMediaType()),
                 projection.getTitle(),
                 projection.getAmountContributedByMe(),
                 projection.getCurrency(),
@@ -139,6 +141,7 @@ public class SupportedCampaignsService {
     public record SupportedCampaignResponse(
             UUID campaignId,
             String imageUrl,
+            CampaignMediaType mediaType,
             String title,
             BigDecimal amountContributedByMe,
             String currency,

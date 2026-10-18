@@ -44,6 +44,7 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
             )
             SELECT CAST(campaign.id AS VARCHAR(36)) AS "campaignId",
                    campaign.media_url AS "imageUrl",
+                   campaign.media_type AS "mediaType",
                    campaign.title AS "title", personal.amount_contributed AS "amountContributedByMe",
                    personal.currency AS "currency", raised.raised_amount AS "raisedAmount",
                    campaign.goal_amount AS "goalAmount",

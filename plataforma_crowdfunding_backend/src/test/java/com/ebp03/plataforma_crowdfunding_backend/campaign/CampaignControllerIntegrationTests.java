@@ -75,6 +75,7 @@ class CampaignControllerIntegrationTests {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.rewards[0].title").value("Agradecimiento"))
+                .andExpect(jsonPath("$.mediaType").value("IMAGE"))
                 .andReturn();
 
         String draftId = extractId(created.getResponse().getContentAsString());
@@ -85,6 +86,40 @@ class CampaignControllerIntegrationTests {
                         .content("{\"title\":\"Bosques del futuro v2\",\"goalAmount\":30000}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Bosques del futuro v2"));
+    }
+
+    @Test
+    void videoMediaTypePersistsThroughDraftUpdatesAndCampaignPublication() throws Exception {
+        Cookie creator = registerCreator("creator.video@test.local");
+        String createdDraft = mockMvc.perform(post("/api/drafts")
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Video de campaña\",\"description\":\"Descripción de la campaña\",\"goalAmount\":30000,\"durationDays\":30,\"category\":\"Tecnología\",\"mediaUrl\":\"https://cdn.example.com/campaign.mp4\",\"mediaType\":\"VIDEO\",\"currency\":\"USD\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mediaType").value("VIDEO"))
+                .andReturn().getResponse().getContentAsString();
+        String draftId = extractId(createdDraft);
+
+        mockMvc.perform(get("/api/drafts/{draftId}", draftId).cookie(creator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mediaType").value("VIDEO"));
+
+        mockMvc.perform(put("/api/drafts/{draftId}", draftId)
+                        .cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Video de campaña editado\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mediaType").value("VIDEO"));
+
+        String publishedCampaign = mockMvc.perform(post("/api/drafts/{draftId}/publish", draftId).cookie(creator))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mediaUrl").value("https://cdn.example.com/campaign.mp4"))
+                .andExpect(jsonPath("$.mediaType").value("VIDEO"))
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(get("/api/campaigns/{campaignId}", extractId(publishedCampaign)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mediaType").value("VIDEO"));
     }
 
     @Test
@@ -142,6 +177,7 @@ class CampaignControllerIntegrationTests {
                         .cookie(creator))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.mediaType").value("IMAGE"))
                 .andExpect(jsonPath("$.currency").value("USD"))
                 .andExpect(jsonPath("$.currencyStatus").value("CONFIGURED"))
                 .andExpect(jsonPath("$.rewards.length()").value(3))
