@@ -44,6 +44,10 @@ public class Campaign {
     @Column(name = "media_url", length = 500)
     private String mediaUrl;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "media_type", nullable = false, length = 20)
+    private CampaignMediaType mediaType = CampaignMediaType.IMAGE;
+
     @Column(length = 3)
     private String currency;
 
@@ -76,6 +80,13 @@ public class Campaign {
 
     public Campaign(UUID creatorId, String title, String description, BigDecimal goalAmount,
                    Instant deadline, String category, String mediaUrl, String currency, CampaignStatus status) {
+        this(creatorId, title, description, goalAmount, deadline, category, mediaUrl, currency,
+                CampaignMediaType.IMAGE, status);
+    }
+
+    public Campaign(UUID creatorId, String title, String description, BigDecimal goalAmount,
+                   Instant deadline, String category, String mediaUrl, String currency,
+                   CampaignMediaType mediaType, CampaignStatus status) {
         this.id = UUID.randomUUID();
         this.creatorId = creatorId;
         this.title = title;
@@ -84,6 +95,7 @@ public class Campaign {
         this.deadline = deadline;
         this.category = category;
         this.mediaUrl = mediaUrl;
+        this.mediaType = mediaType == null ? CampaignMediaType.IMAGE : mediaType;
         this.currency = currency;
         this.status = status;
     }
@@ -111,6 +123,7 @@ public class Campaign {
     public Instant getDeadline() { return deadline; }
     public String getCategory() { return category; }
     public String getMediaUrl() { return mediaUrl; }
+    public CampaignMediaType getMediaType() { return mediaType; }
     public String getCurrency() { return currency; }
     public CampaignStatus getStatus() { return status; }
     public Instant getPublishedAt() { return publishedAt; }
@@ -125,6 +138,7 @@ public class Campaign {
     public void setDeadline(Instant deadline) { this.deadline = deadline; }
     public void setCategory(String category) { this.category = category; }
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
+    public void setMediaType(CampaignMediaType mediaType) { this.mediaType = mediaType; }
     public void setCurrency(String currency) { this.currency = currency; }
     public void setStatus(CampaignStatus status) { this.status = status; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }

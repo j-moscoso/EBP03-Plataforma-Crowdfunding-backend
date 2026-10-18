@@ -3,11 +3,14 @@ package com.ebp03.plataforma_crowdfunding_backend.auth;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.containsString;
 
 import jakarta.servlet.http.Cookie;
 import java.sql.Timestamp;
@@ -80,6 +83,18 @@ class UserProfileControllerIntegrationTests {
         mockMvc.perform(get("/api/auth/me").cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("Ana Pérez"));
+    }
+
+    @Test
+    void corsPreflightAllowsProfilePatchForConfiguredOriginWithCredentials() throws Exception {
+        mockMvc.perform(options("/api/auth/me")
+                        .header("Origin", "http://localhost:5173")
+                        .header("Access-Control-Request-Method", "PATCH")
+                        .header("Access-Control-Request-Headers", "content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+                .andExpect(header().string("Access-Control-Allow-Methods", containsString("PATCH")))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
     }
 
     @Test

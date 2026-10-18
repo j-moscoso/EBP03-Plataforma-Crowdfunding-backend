@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignMediaType;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
@@ -44,7 +45,9 @@ class SupportedCampaignsIntegrationTests {
         User creator = findUser("supported-creator@test.local");
 
         Campaign older = campaign(creator, "Bosques de la vida", "100.00", CampaignStatus.ACTIVE,
-                "https://cdn.example/forest.jpg");
+                "https://cdn.example/forest.mp4");
+        older.setMediaType(CampaignMediaType.VIDEO);
+        campaignRepository.saveAndFlush(older);
         Instant firstConfirmed = Instant.parse("2026-10-15T03:10:00Z");
         Instant latestConfirmed = Instant.parse("2026-10-16T03:10:00Z");
         contribution(older, sponsor, "20.11", "USD", ContributionStatus.CONFIRMED, firstConfirmed);
@@ -74,6 +77,7 @@ class SupportedCampaignsIntegrationTests {
                 .andExpect(jsonPath("$.content[0].totalRaisedPercentage").value(100.00))
                 .andExpect(jsonPath("$.content[0].currency").value("USD"))
                 .andExpect(jsonPath("$.content[0].imageUrl").doesNotExist())
+                .andExpect(jsonPath("$.content[0].mediaType").value("IMAGE"))
                 .andExpect(jsonPath("$.content[0].status").value("ACTIVA"))
                 .andExpect(jsonPath("$.content[0].statusCode").value("PUBLISHED"))
                 .andExpect(jsonPath("$.content[0].lastContributionAt").value(newerConfirmed.toString()))
@@ -89,7 +93,8 @@ class SupportedCampaignsIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].campaignId").value(older.getId().toString()))
-                .andExpect(jsonPath("$.content[0].imageUrl").value("https://cdn.example/forest.jpg"))
+                .andExpect(jsonPath("$.content[0].imageUrl").value("https://cdn.example/forest.mp4"))
+                .andExpect(jsonPath("$.content[0].mediaType").value("VIDEO"))
                 .andExpect(jsonPath("$.content[0].amountContributedByMe").value(25.01))
                 .andExpect(jsonPath("$.content[0].raisedAmount").value(95.01))
                 .andExpect(jsonPath("$.content[0].totalRaisedPercentage").value(95.01))

@@ -3,6 +3,8 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign.domain;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
@@ -42,6 +44,10 @@ public class CampaignDraft {
     @Column(name = "media_url", length = 500)
     private String mediaUrl;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "media_type", nullable = false, length = 20)
+    private CampaignMediaType mediaType = CampaignMediaType.IMAGE;
+
     @Column(length = 3)
     private String currency;
 
@@ -70,6 +76,13 @@ public class CampaignDraft {
 
     public CampaignDraft(UUID creatorId, String title, String description, BigDecimal goalAmount,
                         Integer durationDays, String category, String mediaUrl, String currency) {
+        this(creatorId, title, description, goalAmount, durationDays, category, mediaUrl, currency,
+                CampaignMediaType.IMAGE);
+    }
+
+    public CampaignDraft(UUID creatorId, String title, String description, BigDecimal goalAmount,
+                        Integer durationDays, String category, String mediaUrl, String currency,
+                        CampaignMediaType mediaType) {
         this.id = UUID.randomUUID();
         this.creatorId = creatorId;
         this.title = title;
@@ -78,6 +91,7 @@ public class CampaignDraft {
         this.durationDays = durationDays;
         this.category = category;
         this.mediaUrl = mediaUrl;
+        this.mediaType = mediaType == null ? CampaignMediaType.IMAGE : mediaType;
         this.currency = currency;
         this.completionPercentage = 0;
         this.savedAt = Instant.now();
@@ -106,6 +120,7 @@ public class CampaignDraft {
     public Integer getDurationDays() { return durationDays; }
     public String getCategory() { return category; }
     public String getMediaUrl() { return mediaUrl; }
+    public CampaignMediaType getMediaType() { return mediaType; }
     public String getCurrency() { return currency; }
     public Integer getCompletionPercentage() { return completionPercentage; }
     public Instant getSavedAt() { return savedAt; }
@@ -119,6 +134,7 @@ public class CampaignDraft {
     public void setDurationDays(Integer durationDays) { this.durationDays = durationDays; }
     public void setCategory(String category) { this.category = category; }
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
+    public void setMediaType(CampaignMediaType mediaType) { this.mediaType = mediaType; }
     public void setCurrency(String currency) { this.currency = currency; }
     public void setCompletionPercentage(Integer completionPercentage) { this.completionPercentage = completionPercentage; }
     public void setSavedAt(Instant savedAt) { this.savedAt = savedAt; }

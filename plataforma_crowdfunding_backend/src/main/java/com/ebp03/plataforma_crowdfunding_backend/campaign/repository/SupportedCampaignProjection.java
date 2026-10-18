@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 public interface SupportedCampaignProjection {
     String getCampaignId();
     String getImageUrl();
+    String getMediaType();
     String getTitle();
     BigDecimal getAmountContributedByMe();
     String getCurrency();
