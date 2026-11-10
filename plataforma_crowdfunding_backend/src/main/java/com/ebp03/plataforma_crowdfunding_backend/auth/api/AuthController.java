@@ -54,21 +54,21 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest, HttpServletResponse response) {
         AuthService.AuthenticatedUser authenticated = authService.register(request, userAgent(httpRequest), httpRequest.getRemoteAddr());
-        addSessionCookie(response, authenticated.session());
+        addSessionCookie(response, authenticated.session(), httpRequest);
         return ResponseEntity.status(201).body(toResponse(authenticated));
     }
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest, HttpServletResponse response) {
         AuthService.AuthenticatedUser authenticated = authService.login(request, userAgent(httpRequest), httpRequest.getRemoteAddr());
-        addSessionCookie(response, authenticated.session());
+        addSessionCookie(response, authenticated.session(), httpRequest);
         return ResponseEntity.ok(toResponse(authenticated));
     }
 
     @PostMapping("/social")
     public ResponseEntity<AuthResponse> social(@Valid @RequestBody SocialLoginRequest request, HttpServletRequest httpRequest, HttpServletResponse response) {
         AuthService.AuthenticatedUser authenticated = authService.socialLogin(request, userAgent(httpRequest), httpRequest.getRemoteAddr());
-        addSessionCookie(response, authenticated.session());
+        addSessionCookie(response, authenticated.session(), httpRequest);
         return ResponseEntity.status(201).body(toResponse(authenticated));
     }
 
@@ -86,7 +86,7 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response) {
         sessionCookie(request).ifPresent(sessionService::revoke);
-        response.addHeader(HttpHeaders.SET_COOKIE, expiredCookie().toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, expiredCookie(request).toString());
         return ResponseEntity.noContent().build();
     }
 
@@ -95,14 +95,38 @@ public class AuthController {
         return new AuthResponse(PublicUser.from(authenticated.user()), new AuthResponse.SessionResponse(session.getExpiresAt()));
     }
 
-    private void addSessionCookie(HttpServletResponse response, SessionService.IssuedSession issued) {
+    private void addSessionCookie(HttpServletResponse response, SessionService.IssuedSession issued,
+                                  HttpServletRequest request) {
         long maxAge = Math.max(1, Duration.between(Instant.now(), issued.session().getExpiresAt()).toSeconds());
         response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(cookieName, issued.rawToken())
-                .httpOnly(true).secure(cookieSecure).path("/").sameSite(cookieSameSite).maxAge(maxAge).build().toString());
+                .httpOnly(true)
+                .secure(cookieSecure || isCrossOriginHttps(request))
+                .path("/")
+                .sameSite(cookieSameSite(request))
+                .maxAge(maxAge)
+                .build().toString());
     }
 
-    private ResponseCookie expiredCookie() {
-        return ResponseCookie.from(cookieName, "").httpOnly(true).secure(cookieSecure).path("/").sameSite(cookieSameSite).maxAge(0).build();
+    private ResponseCookie expiredCookie(HttpServletRequest request) {
+        return ResponseCookie.from(cookieName, "")
+                .httpOnly(true)
+                .secure(cookieSecure || isCrossOriginHttps(request))
+                .path("/")
+                .sameSite(cookieSameSite(request))
+                .maxAge(0)
+                .build();
+    }
+
+    private String cookieSameSite(HttpServletRequest request) {
+        return isCrossOriginHttps(request) ? "None" : cookieSameSite;
+    }
+
+    private boolean isCrossOriginHttps(HttpServletRequest request) {
+        String origin = request.getHeader("Origin");
+        return origin != null && origin.startsWith("https://") && !origin.isBlank()
+                && !origin.equals(request.getScheme() + "://" + request.getServerName()
+                        + (request.getServerPort() == 443 || request.getServerPort() == 80
+                        ? "" : ":" + request.getServerPort()));
     }
 
     private java.util.Optional<String> sessionCookie(HttpServletRequest request) {

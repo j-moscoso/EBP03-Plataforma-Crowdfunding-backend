@@ -24,12 +24,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@TestPropertySource(properties = "app.cors.allowed-origins=http://localhost:5173,https://crowdfunding.example")
 class UserProfileControllerIntegrationTests {
     @Autowired
     private MockMvc mockMvc;
@@ -95,6 +97,20 @@ class UserProfileControllerIntegrationTests {
                 .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
                 .andExpect(header().string("Access-Control-Allow-Methods", containsString("PATCH")))
                 .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+    }
+
+    @Test
+    void crossOriginHttpsLoginIssuesCookieUsableByDeployedFrontend() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .header("Origin", "https://crowdfunding.example")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Nombre actual\",\"email\":\"cookie-cross-origin@test.local\","
+                                + "\"password\":\"Secure1!\",\"role\":\"creator\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Set-Cookie",
+                        containsString("SameSite=None")))
+                .andExpect(header().string("Set-Cookie",
+                        containsString("Secure")));
     }
 
     @Test
