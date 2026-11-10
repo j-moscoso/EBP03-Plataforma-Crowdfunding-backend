@@ -1,7 +1,6 @@
 package com.ebp03.plataforma_crowdfunding_backend.campaign.repository;
 
 import java.math.BigDecimal;
-import java.time.OffsetDateTime;
 
 public interface SupportedCampaignProjection {
     String getCampaignId();
@@ -12,6 +11,6 @@ public interface SupportedCampaignProjection {
     String getCurrency();
     BigDecimal getRaisedAmount();
     BigDecimal getGoalAmount();
-    OffsetDateTime getLastContributionAt();
+    Object getLastContributionAt();
     String getStatusCode();
 }

@@ -14,3 +14,15 @@ plataforma.
 
 Diseño de la solución, backend básico de la aplicación web e integración
 y despliegue de la plataforma.
+
+## Configuración de PostgreSQL en producción
+
+Cuando `SUPABASE_DB_URL` apunta a PostgreSQL, configura también:
+
+```env
+DB_DRIVER_CLASS_NAME=org.postgresql.Driver
+JPA_DATABASE_PLATFORM=org.hibernate.dialect.PostgreSQLDialect
+HIBERNATE_DIALECT=org.hibernate.dialect.PostgreSQLDialect
+```
+
+Los valores por defecto usan H2 para desarrollo local y pruebas.
