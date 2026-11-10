@@ -158,6 +158,16 @@ class SupportedCampaignsIntegrationTests {
     }
 
     @Test
+    void authenticatedSponsorUsesSpringPrincipalForSupportedCampaigns() throws Exception {
+        Cookie sponsorSession = register("supported-principal@test.local", "sponsor");
+
+        mockMvc.perform(get("/api/sponsors/me/supported-campaigns")
+                        .cookie(sponsorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
     void statusStrategyMapsAllCampaignStatesAndOmitsLegacyMixedCurrencyCampaigns() throws Exception {
         Cookie sponsorSession = register("supported-status@test.local", "sponsor");
         register("supported-status-other@test.local", "sponsor");
