@@ -11,6 +11,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -120,7 +123,16 @@ public class SupportedCampaignsService {
                 percentage,
                 presentation.status(),
                 presentation.statusCode(),
-                projection.getLastContributionAt().toInstant());
+                toInstant(projection.getLastContributionAt()));
+    }
+
+    private Instant toInstant(Object value) {
+        if (value instanceof Instant instant) return instant;
+        if (value instanceof OffsetDateTime offsetDateTime) return offsetDateTime.toInstant();
+        if (value instanceof java.sql.Timestamp timestamp) return timestamp.toInstant();
+        if (value instanceof LocalDateTime localDateTime) return localDateTime.toInstant(ZoneOffset.UTC);
+        throw new IllegalStateException("Tipo de fecha no soportado para lastContributionAt: "
+                + (value == null ? "null" : value.getClass().getName()));
     }
 
     private void requireSponsor(User user) {

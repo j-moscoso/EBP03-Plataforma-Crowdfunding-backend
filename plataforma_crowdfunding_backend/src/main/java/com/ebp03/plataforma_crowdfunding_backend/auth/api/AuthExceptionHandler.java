@@ -16,6 +16,8 @@ import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorP
 import com.ebp03.plataforma_crowdfunding_backend.campaign.api.CampaignUpdatePublicationRequest.UnknownCampaignUpdateFieldException;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -27,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class AuthExceptionHandler {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuthExceptionHandler.class);
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<ApiError> invalidPathParameter(MethodArgumentTypeMismatchException exception) {
         return ResponseEntity.badRequest().body(new ApiError(
@@ -153,6 +156,17 @@ public class AuthExceptionHandler {
             ? "El aporte supera el importe que todavía falta por recaudar."
             : code.equals("REQUEST_ERROR") ? reason : "La operación no pudo completarse.";
         return ResponseEntity.status(exception.getStatusCode()).body(new ApiError(code, message));
+    }
+
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<ApiError> unexpected(Exception exception) throws Exception {
+        if (exception instanceof org.springframework.security.access.AccessDeniedException
+                || exception instanceof org.springframework.security.core.AuthenticationException) {
+            throw exception;
+        }
+        LOGGER.error("Error no controlado al procesar la solicitud", exception);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ApiError("INTERNAL_ERROR", "Error interno del servidor."));
     }
 
     private String validationCode(String constraintCode) {

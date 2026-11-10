@@ -1,6 +1,7 @@
 package com.ebp03.plataforma_crowdfunding_backend.auth.config;
 
 import com.ebp03.plataforma_crowdfunding_backend.auth.security.SessionAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -34,6 +35,7 @@ public class SecurityConfig {
                 .cors(cors -> { })
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/social", "/api/auth/logout",
                                 "/api/auth/password-reset/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll()
