@@ -1,11 +1,10 @@
 package com.ebp03.plataforma_crowdfunding_backend.campaign.api;
 
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
-import com.ebp03.plataforma_crowdfunding_backend.auth.domain.Session;
-import com.ebp03.plataforma_crowdfunding_backend.auth.security.SessionAuthenticationFilter;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.SupportedCampaignsService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Set;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,12 +28,11 @@ public class SupportedCampaignsController {
     public ResponseEntity<SupportedCampaignsService.SupportedCampaignsPageResponse> getSupportedCampaigns(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int pageSize,
-            HttpServletRequest request) {
+            HttpServletRequest request,
+            @AuthenticationPrincipal User sponsor) {
         if (!ALLOWED_PARAMETERS.containsAll(request.getParameterMap().keySet())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_PARAMETER");
         }
-        Session session = (Session) request.getAttribute(SessionAuthenticationFilter.SESSION_REQUEST_ATTRIBUTE);
-        User sponsor = session == null ? null : session.getUser();
         return ResponseEntity.ok(supportedCampaignsService.getSupportedCampaigns(sponsor, page, pageSize));
     }
 }
