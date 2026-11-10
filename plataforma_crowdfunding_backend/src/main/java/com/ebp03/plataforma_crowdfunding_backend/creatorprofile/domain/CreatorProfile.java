@@ -85,6 +85,10 @@ public class CreatorProfile {
         this.protectedBankAccountDocument = protectedBankAccountDocument;
     }
 
+    public void updateDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
     @PrePersist
     void onCreate() {
         Instant now = Instant.now();

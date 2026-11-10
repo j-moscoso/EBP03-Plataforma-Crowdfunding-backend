@@ -65,6 +65,7 @@ public class CreatorProfileService {
         String protectedDocument = bankDataProtection.encrypt(request.bankAccountDocument());
         CreatorProfile profile = profileRepository.findByUser_Id(user.getId()).orElse(null);
         String displayName = request.displayName().strip();
+        user.updateName(displayName);
         String bio = normalizeOptionalText(request.bio());
         String professionalTitle = normalizeOptionalText(request.professionalTitle());
         String phone = normalizeOptionalText(request.phone());
