@@ -2,6 +2,7 @@ package com.ebp03.plataforma_crowdfunding_backend.campaign;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -90,7 +91,17 @@ class CampaignUpdatePublicationIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].type").value("CAMPAIGN_UPDATE_PUBLISHED"))
-                .andExpect(jsonPath("$.content[0].campaignUpdateId").value(updateId.toString()));
+                .andExpect(jsonPath("$.content[0].campaignUpdateId").value(updateId.toString()))
+                .andExpect(jsonPath("$.content[0].readAt").doesNotExist());
+        UUID notificationId = UUID.fromString(
+                mockMvc.perform(get("/api/notifications/me").cookie(sponsorOneSession))
+                        .andReturn().getResponse().getContentAsString()
+                        .replaceAll(".*\"id\":\"([^\"]+)\".*", "$1"));
+        mockMvc.perform(patch("/api/notifications/{notificationId}/read", notificationId).cookie(sponsorOneSession))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/notifications/me").param("unreadOnly", "true").cookie(sponsorOneSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
         mockMvc.perform(get("/api/notifications/me").cookie(sponsorTwoSession))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1));

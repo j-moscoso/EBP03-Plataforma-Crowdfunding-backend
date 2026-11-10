@@ -6,6 +6,7 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.domain.Notification;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.NotificationRepository;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -40,5 +41,11 @@ public class NotificationQueryService {
                 .toList();
         return new NotificationPageResponse(
                 content, page, pageSize, notifications.getTotalElements(), notifications.getTotalPages());
+    }
+
+    @Transactional
+    public void markAsRead(User authenticatedUser, UUID notificationId) {
+        if (authenticatedUser == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        notificationRepository.markAsRead(notificationId, authenticatedUser.getId());
     }
 }
