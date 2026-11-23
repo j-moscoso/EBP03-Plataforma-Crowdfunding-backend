@@ -102,7 +102,7 @@ class CampaignControllerIntegrationTests {
         String createdDraft = mockMvc.perform(post("/api/drafts")
                         .cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"Video de campaña\",\"description\":\"Descripción de la campaña\",\"goalAmount\":30000,\"durationDays\":30,\"category\":\"Tecnología\",\"mediaUrl\":\"https://cdn.example.com/campaign.mp4\",\"mediaType\":\"VIDEO\",\"currency\":\"USD\"}"))
+                        .content("{\"title\":\"Video de campaña\",\"description\":\"Descripción de la campaña\",\"goalAmount\":30000,\"durationDays\":30,\"category\":\"Tecnología\",\"mediaUrl\":\"https://www.youtube.com/watch?v=abc_123\",\"mediaType\":\"VIDEO\",\"currency\":\"USD\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.mediaType").value("VIDEO"))
                 .andReturn().getResponse().getContentAsString();
@@ -121,7 +121,7 @@ class CampaignControllerIntegrationTests {
 
         String publishedCampaign = mockMvc.perform(post("/api/drafts/{draftId}/publish", draftId).cookie(creator))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.mediaUrl").value("https://cdn.example.com/campaign.mp4"))
+                .andExpect(jsonPath("$.mediaUrl").value("https://www.youtube.com/watch?v=abc_123"))
                 .andExpect(jsonPath("$.mediaType").value("VIDEO"))
                 .andReturn().getResponse().getContentAsString();
 
