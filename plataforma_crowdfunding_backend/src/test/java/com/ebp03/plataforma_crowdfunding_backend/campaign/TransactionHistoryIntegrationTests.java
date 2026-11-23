@@ -15,9 +15,11 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.VerificationStatus;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignMediaType;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.FundingModel;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Payment;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.PaymentStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.TransactionReceipt;
@@ -136,6 +138,7 @@ class TransactionHistoryIntegrationTests {
     @Test
     void pendingAndFailedContributionsDoNotReceiveReceiptsAndRefundWebhooksDoNotRegress() throws Exception {
         Cookie sponsorSession = register("history-transitions@test.local", "sponsor");
+        Cookie otherSponsorSession = register("history-transitions-other@test.local", "sponsor");
         User sponsor = findUser("history-transitions@test.local");
         User creator = userRepository.save(new User(
                 "History Creator", "history-transitions-creator@test.local", "hashed",
@@ -149,14 +152,27 @@ class TransactionHistoryIntegrationTests {
                         .content("{\"amount\":10.05,\"currency\":\"USD\",\"paymentMethodId\":\"sim_success\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.amount").value(10.05))
+                .andExpect(jsonPath("$.status").value("HELD"))
+                .andExpect(jsonPath("$.receipt.status").value("HELD"))
+                .andExpect(jsonPath("$.receipt.statusLabel").value("Retenido"))
+                .andExpect(jsonPath("$.receipt.retentionDescription")
+                        .value("Fondos retenidos de forma segura hasta que finalice la campaña"))
                 .andReturn();
         String successBody = successfulResult.getResponse().getContentAsString();
         UUID contributionId = UUID.fromString(extractValue(successBody, "id", 0));
         UUID paymentId = UUID.fromString(extractValue(successBody, "id", successBody.indexOf("\"payment\"")));
         TransactionReceipt receipt = receiptRepository.findByContributionId(contributionId).orElseThrow();
+        String originalReferenceCode = receipt.getReferenceCode();
         assertEquals(TransactionReceiptStatus.HELD, receipt.getStatus());
         assertNotNull(receipt.getIssuedAt());
         assertTrue(receipt.getReferenceCode().startsWith("REF-"));
+        mockMvc.perform(get("/api/transactions/{contributionId}", contributionId).cookie(sponsorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.receipt.referenceCode").value(originalReferenceCode))
+                .andExpect(jsonPath("$.receipt.retentionDescription")
+                        .value("Fondos retenidos de forma segura hasta que finalice la campaña"));
+        mockMvc.perform(get("/api/transactions/{contributionId}", contributionId).cookie(otherSponsorSession))
+                .andExpect(status().isForbidden());
 
         String payload = "{\"event\":\"refund\"}";
         String signature = contributionService.sign(
@@ -204,17 +220,30 @@ class TransactionHistoryIntegrationTests {
         assertEquals(TransactionReceiptStatus.REFUNDED,
                 receiptRepository.findByContributionId(contributionId).orElseThrow().getStatus());
         assertNotNull(receiptRepository.findByContributionId(contributionId).orElseThrow().getRefundedAt());
+        assertEquals(originalReferenceCode,
+                receiptRepository.findByContributionId(contributionId).orElseThrow().getReferenceCode());
+        assertNotNull(paymentRepository.findById(paymentId).orElseThrow().getRefundedAt());
         assertEquals(2, jdbcTemplate.queryForObject(
                 "select count(*) from payment_events where provider_event_id in (?, ?)",
                 Integer.class,
                 "history-refund-event",
                 "history-late-success-event"));
-        mockMvc.perform(get("/api/contributions/me").cookie(sponsorSession).param("status", "REFUNDED"))
+        mockMvc.perform(get("/api/transactions/me").cookie(sponsorSession).param("status", "REFUNDED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].contributionStatus").value("REFUNDED"))
                 .andExpect(jsonPath("$.content[0].paymentStatus").value("REFUNDED"))
                 .andExpect(jsonPath("$.content[0].receiptStatus").value("REFUNDED"))
-                .andExpect(jsonPath("$.content[0].receiptStatusLabel").value("Reembolsado"));
+                .andExpect(jsonPath("$.content[0].receiptStatusLabel").value("Reembolsado"))
+                .andExpect(jsonPath("$.content[0].refundedAt").isNotEmpty());
+        mockMvc.perform(get("/api/transactions/{contributionId}", contributionId).cookie(sponsorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REFUNDED"))
+                .andExpect(jsonPath("$.payment.status").value("REFUNDED"))
+                .andExpect(jsonPath("$.payment.refundedAt").isNotEmpty())
+                .andExpect(jsonPath("$.receipt.status").value("REFUNDED"))
+                .andExpect(jsonPath("$.receipt.statusLabel").value("Reembolsado"))
+                .andExpect(jsonPath("$.receipt.refundedAt").isNotEmpty())
+                .andExpect(jsonPath("$.receipt.referenceCode").value(originalReferenceCode));
 
         MvcResult failedResult = mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaign.getId())
                         .cookie(sponsorSession)
@@ -232,6 +261,29 @@ class TransactionHistoryIntegrationTests {
                 .andExpect(jsonPath("$.content[0].contributionStatus").value("FAILED"))
                 .andExpect(jsonPath("$.content[0].paymentStatus").value("FAILED"))
                 .andExpect(jsonPath("$.content[0].referenceCode").doesNotExist());
+    }
+
+    @Test
+    void successfulFlexibleCampaignContributionRemainsConfirmedWithSuccessfulReceipt() throws Exception {
+        Cookie sponsorSession = register("history-flexible-sponsor@test.local", "sponsor");
+        User creator = userRepository.save(new User(
+                "Flexible History Creator", "history-flexible-creator@test.local", "hashed",
+                UserRole.CREATOR, VerificationStatus.VERIFIED, AccountStatus.ACTIVE));
+        Campaign campaign = campaignRepository.save(new Campaign(
+                creator.getId(), "Flexible history", "Descripción", new BigDecimal("1000.00"),
+                Instant.now().plusSeconds(86_400), "Comunidad", null, "USD",
+                CampaignMediaType.IMAGE, FundingModel.FLEXIBLE, CampaignStatus.ACTIVE));
+
+        mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaign.getId())
+                        .cookie(sponsorSession)
+                        .header("Idempotency-Key", "history-flexible-success")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":10.00,\"currency\":\"USD\",\"paymentMethodId\":\"sim_success\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.receipt.status").value("SUCCESSFUL"))
+                .andExpect(jsonPath("$.receipt.statusLabel").value("Exitoso"))
+                .andExpect(jsonPath("$.receipt.retentionDescription").doesNotExist());
     }
 
     private Cookie register(String email, String role) throws Exception {

@@ -19,7 +19,7 @@ public class ContributionController {
     }
     @PostMapping("/campaigns/{campaignId}/contributions")
     public ResponseEntity<?> create(@AuthenticationPrincipal User user, @PathVariable UUID campaignId, @RequestHeader("Idempotency-Key") String key, @RequestBody ContributionService.CreateRequest request) { return ResponseEntity.status(201).body(service.create(user, campaignId, request, key)); }
-    @GetMapping("/contributions/me")
+    @GetMapping({"/contributions/me", "/transactions/me"})
     public ResponseEntity<TransactionHistoryService.HistoryPageResponse> me(
             @AuthenticationPrincipal User user,
             @RequestParam(defaultValue = "0") int page,
@@ -27,7 +27,7 @@ public class ContributionController {
             @RequestParam(required = false) String status) {
         return ResponseEntity.ok(transactionHistoryService.getHistory(user, page, pageSize, status));
     }
-    @GetMapping("/contributions/{contributionId}")
+    @GetMapping({"/contributions/{contributionId}", "/transactions/{contributionId}"})
     public ResponseEntity<?> detail(@AuthenticationPrincipal User user, @PathVariable UUID contributionId) { return ResponseEntity.ok(service.detail(user, contributionId)); }
     @PostMapping("/contributions/{contributionId}/retry")
     public ResponseEntity<?> retry(@AuthenticationPrincipal User user, @PathVariable UUID contributionId, @RequestHeader("Idempotency-Key") String key, @RequestBody ContributionService.RetryRequest request) { return ResponseEntity.ok(service.retry(user, contributionId, request.paymentMethodId(), key)); }

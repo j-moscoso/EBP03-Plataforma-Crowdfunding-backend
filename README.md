@@ -56,3 +56,19 @@ Las fechas mensuales se calculan en UTC con `ZonedDateTime.plusMonths(1)`. Por
 ejemplo, una fecha de cobro el 31 se ajusta al último día válido del mes
 siguiente. Las pruebas backend se ejecutan desde `plataforma_crowdfunding_backend`
 con `mvn test`.
+
+## Reembolsos de campañas fijas fallidas
+
+`CampaignClosureService` procesa campañas activas vencidas cada minuto y
+también puede ejecutarse desde el servicio de campañas. Si una campaña `FIXED`
+queda bajo la meta, la misma transacción marca la campaña `FAILED` y solo
+cambia aportes `HELD` a `REFUNDED`; actualiza el pago exitoso más reciente, el
+comprobante existente y sus fechas, y persiste una notificación interna por
+aporte. No se realiza una transferencia externa. Los cierres se serializan con
+bloqueo pesimista de campaña y reejecutarlos no duplica notificaciones.
+
+El historial y detalle existentes están disponibles también en
+`/api/transactions/me` y `/api/transactions/{contributionId}`. El detalle
+expone la descripción de retención únicamente mientras el aporte y comprobante
+estén `HELD` y la campaña siga `ACTIVE`; tras el cierre muestra el estado
+`REFUNDED`, conserva el código original del comprobante y expone la fecha.

@@ -1,5 +1,7 @@
 package com.ebp03.plataforma_crowdfunding_backend.campaign.service;
 
+import com.ebp03.plataforma_crowdfunding_backend.auth.domain.Notification;
+import com.ebp03.plataforma_crowdfunding_backend.auth.repository.NotificationRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
@@ -17,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -25,24 +28,28 @@ public class CampaignClosureService {
     private final ContributionRepository contributions;
     private final PaymentRepository payments;
     private final TransactionReceiptRepository receipts;
+    private final NotificationRepository notifications;
 
     public CampaignClosureService(CampaignRepository campaigns,
                                   ContributionRepository contributions,
                                   PaymentRepository payments,
-                                  TransactionReceiptRepository receipts) {
+                                  TransactionReceiptRepository receipts,
+                                  NotificationRepository notifications) {
         this.campaigns = campaigns;
         this.contributions = contributions;
         this.payments = payments;
         this.receipts = receipts;
+        this.notifications = notifications;
     }
 
     @Scheduled(fixedDelayString = "${app.campaign.closure-fixed-delay-ms:60000}",
                initialDelayString = "${app.campaign.closure-fixed-delay-ms:60000}")
+    @Transactional
     public void scheduledClosure() {
         processExpiredCampaigns(Instant.now());
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processExpiredCampaigns(Instant now) {
         if (now == null) now = Instant.now();
         final Instant effectiveNow = now;
@@ -111,13 +118,12 @@ public class CampaignClosureService {
             contribution.setClosedAt(now);
             contributions.save(contribution);
 
-            payments.findFirstByContributionIdOrderByCreatedAtDescIdDesc(contribution.getId())
+            payments.findFirstByContributionIdAndStatusOrderByCreatedAtDescIdDesc(
+                    contribution.getId(), PaymentStatus.SUCCEEDED)
                     .ifPresent(payment -> {
-                        if (payment.getStatus() == PaymentStatus.SUCCEEDED) {
-                            payment.setStatus(PaymentStatus.REFUNDED);
-                            payment.setRefundedAt(now);
-                            payments.save(payment);
-                        }
+                        payment.setStatus(PaymentStatus.REFUNDED);
+                        payment.setRefundedAt(now);
+                        payments.save(payment);
                     });
             receipts.findByContributionId(contribution.getId()).ifPresent(receipt -> {
                 if (receipt.getStatus() == com.ebp03.plataforma_crowdfunding_backend.campaign.domain.TransactionReceiptStatus.HELD) {
@@ -125,7 +131,21 @@ public class CampaignClosureService {
                     receipts.save(receipt);
                 }
             });
+            createRefundNotification(campaign, contribution);
         }
+    }
+
+    private void createRefundNotification(Campaign campaign, Contribution contribution) {
+        String type = "CAMPAIGN_REFUND";
+        if (notifications.existsByContributionIdAndType(contribution.getId(), type)) {
+            return;
+        }
+        String body = "Tu aporte de " + contribution.getAmount().toPlainString() + " "
+                + contribution.getCurrency() + " a \"" + campaign.getTitle()
+                + "\" fue reembolsado porque la campaña no alcanzó su meta.";
+        notifications.save(new Notification(
+                contribution.getSponsorId(), campaign.getId(), null, contribution.getId(),
+                type, "Reembolso procesado", body));
     }
 
     private void consolidateFlexible(Campaign campaign, Instant now) {

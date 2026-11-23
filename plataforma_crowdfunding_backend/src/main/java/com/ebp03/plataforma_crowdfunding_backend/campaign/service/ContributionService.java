@@ -24,6 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class ContributionService {
+    private static final String HELD_FUNDS_DESCRIPTION =
+            "Fondos retenidos de forma segura hasta que finalice la campaña";
     private final CampaignRepository campaigns;
     private final CampaignRewardRepository rewards;
     private final ContributionRepository contributions;
@@ -387,7 +389,58 @@ public class ContributionService {
         if (!c.getSponsorId().equals(sponsor.getId())) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tienes permisos para reintentar este aporte");
         return c;
     }
-    private ContributionResponse response(Contribution c) { Payment p = payments.findFirstByContributionIdOrderByCreatedAtDescIdDesc(c.getId()).orElse(null); UUID rewardId = c.getReward() == null ? null : c.getReward().getId(); UUID campaignId = c.getCampaign() == null ? null : c.getCampaign().getId(); return new ContributionResponse(c.getId(), campaignId, c.getSponsorId(), rewardId, c.getAmount(), c.getCurrency(), c.getStatus(), p == null ? null : new PaymentResponse(p.getId(), p.getStatus()), c.getCreatedAt(), new ContributionView(c.getId(), campaignId, c.getSponsorId(), rewardId, c.getAmount(), c.getCurrency(), c.getStatus()), c.getCreatorId(), c.getSubscriptionId()); }
+    private ContributionResponse response(Contribution contribution) {
+        Payment payment = payments.findFirstByContributionIdOrderByCreatedAtDescIdDesc(contribution.getId())
+                .orElse(null);
+        TransactionReceipt receipt = receipts.findByContributionId(contribution.getId()).orElse(null);
+        UUID rewardId = contribution.getReward() == null ? null : contribution.getReward().getId();
+        UUID campaignId = contribution.getCampaign() == null ? null : contribution.getCampaign().getId();
+        PaymentResponse paymentResponse = payment == null
+                ? null
+                : new PaymentResponse(payment.getId(), payment.getStatus(), payment.getRefundedAt());
+        ReceiptResponse receiptResponse = receipt == null
+                ? null
+                : new ReceiptResponse(
+                        receipt.getId(),
+                        receipt.getReferenceCode(),
+                        receipt.getStatus(),
+                        receiptLabel(receipt.getStatus()),
+                        receipt.getIssuedAt(),
+                        receipt.getRefundedAt(),
+                        isHeldOnActiveCampaign(contribution, receipt) ? HELD_FUNDS_DESCRIPTION : null);
+        return new ContributionResponse(
+                contribution.getId(),
+                campaignId,
+                contribution.getSponsorId(),
+                rewardId,
+                contribution.getAmount(),
+                contribution.getCurrency(),
+                contribution.getStatus(),
+                paymentResponse,
+                receiptResponse,
+                contribution.getCreatedAt(),
+                new ContributionView(
+                        contribution.getId(), campaignId, contribution.getSponsorId(), rewardId,
+                        contribution.getAmount(), contribution.getCurrency(), contribution.getStatus()),
+                contribution.getCreatorId(),
+                contribution.getSubscriptionId());
+    }
+
+    private boolean isHeldOnActiveCampaign(Contribution contribution, TransactionReceipt receipt) {
+        return contribution.getStatus() == ContributionStatus.HELD
+                && receipt.getStatus() == TransactionReceiptStatus.HELD
+                && contribution.getCampaign() != null
+                && contribution.getCampaign().getStatus() == CampaignStatus.ACTIVE;
+    }
+
+    private String receiptLabel(TransactionReceiptStatus status) {
+        return switch (status) {
+            case HELD -> "Retenido";
+            case SUCCESSFUL -> "Exitoso";
+            case REFUNDED -> "Reembolsado";
+            case FAILED -> "Fallido";
+        };
+    }
     private void requireSponsor(User user) { if (user == null || user.getRole() != UserRole.SPONSOR) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Solo los sponsors pueden realizar aportes"); }
     private void validateAmount(BigDecimal amount, String currency) { if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) bad("amount debe ser positivo con máximo dos decimales"); if (currency == null || !currency.trim().matches("[A-Za-z]{3}")) bad("currency debe tener 3 letras"); }
     private void bad(String message) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
@@ -395,8 +448,29 @@ public class ContributionService {
 
     public record CreateRequest(BigDecimal amount, String currency, UUID rewardId, String paymentMethodId) { }
     public record RetryRequest(String paymentMethodId) { }
-    public record PaymentResponse(UUID id, PaymentStatus status) { }
-    public record ContributionResponse(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status, PaymentResponse payment, Instant createdAt, ContributionView contribution, UUID creatorId, UUID subscriptionId) { }
+    public record PaymentResponse(UUID id, PaymentStatus status, Instant refundedAt) { }
+    public record ReceiptResponse(
+            UUID id,
+            String referenceCode,
+            TransactionReceiptStatus status,
+            String statusLabel,
+            Instant issuedAt,
+            Instant refundedAt,
+            String retentionDescription) { }
+    public record ContributionResponse(
+            UUID id,
+            UUID campaignId,
+            UUID sponsorId,
+            UUID rewardId,
+            BigDecimal amount,
+            String currency,
+            ContributionStatus status,
+            PaymentResponse payment,
+            ReceiptResponse receipt,
+            Instant createdAt,
+            ContributionView contribution,
+            UUID creatorId,
+            UUID subscriptionId) { }
     public record ContributionView(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status) { }
     public record PageResponse(java.util.List<ContributionResponse> content, int page, int pageSize, long totalElements, int totalPages) { }
 

@@ -85,6 +85,13 @@ public class TransactionHistoryService {
     private HistoryItem toHistoryItem(Contribution contribution, Payment payment, TransactionReceipt receipt) {
         TransactionReceiptStatus receiptStatus = receipt == null ? null : receipt.getStatus();
         boolean recurring = contribution.getCampaign() == null;
+        Instant refundedAt = receipt != null && receipt.getRefundedAt() != null
+                ? receipt.getRefundedAt()
+                : payment != null && payment.getRefundedAt() != null
+                        ? payment.getRefundedAt()
+                        : contribution.getStatus() == ContributionStatus.REFUNDED
+                                ? contribution.getClosedAt()
+                                : null;
         return new HistoryItem(
                 contribution.getId(),
                 contribution.getCreatedAt(),
@@ -98,7 +105,8 @@ public class TransactionHistoryService {
                 contribution.getStatus(),
                 payment == null ? null : payment.getStatus(),
                 contribution.getCreatorId(),
-                contribution.getSubscriptionId());
+                contribution.getSubscriptionId(),
+                refundedAt);
     }
 
     private String label(TransactionReceiptStatus status) {
@@ -147,7 +155,8 @@ public class TransactionHistoryService {
             ContributionStatus contributionStatus,
             PaymentStatus paymentStatus,
             UUID creatorId,
-            UUID subscriptionId) {
+            UUID subscriptionId,
+            Instant refundedAt) {
     }
 
     public record HistoryPageResponse(
