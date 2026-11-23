@@ -8,6 +8,7 @@ public record NotificationResponse(
         String type,
         UUID campaignId,
         UUID campaignUpdateId,
+        UUID contributionId,
         String title,
         String body,
         Instant readAt,

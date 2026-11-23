@@ -22,7 +22,7 @@ public class Contribution {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "campaign_id", nullable = false)
+    @JoinColumn(name = "campaign_id")
     private Campaign campaign;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -31,6 +31,12 @@ public class Contribution {
 
     @Column(name = "sponsor_id", nullable = false)
     private UUID sponsorId;
+
+    @Column(name = "creator_id")
+    private UUID creatorId;
+
+    @Column(name = "subscription_id")
+    private UUID subscriptionId;
 
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
@@ -76,6 +82,18 @@ public class Contribution {
         this.idempotencyKey = idempotencyKey;
     }
 
+    public Contribution(UUID sponsorId, UUID creatorId, UUID subscriptionId, BigDecimal amount,
+                        String currency, ContributionStatus status, String idempotencyKey) {
+        this.id = UUID.randomUUID();
+        this.sponsorId = sponsorId;
+        this.creatorId = creatorId;
+        this.subscriptionId = subscriptionId;
+        this.amount = amount;
+        this.currency = currency;
+        this.status = status;
+        this.idempotencyKey = idempotencyKey;
+    }
+
     @PrePersist
     void onCreate() {
         Instant now = Instant.now();
@@ -91,6 +109,8 @@ public class Contribution {
     public UUID getId() { return id; }
     public Campaign getCampaign() { return campaign; }
     public UUID getSponsorId() { return sponsorId; }
+    public UUID getCreatorId() { return creatorId; }
+    public UUID getSubscriptionId() { return subscriptionId; }
     public CampaignReward getReward() { return reward; }
     public BigDecimal getAmount() { return amount; }
     public String getCurrency() { return currency; }

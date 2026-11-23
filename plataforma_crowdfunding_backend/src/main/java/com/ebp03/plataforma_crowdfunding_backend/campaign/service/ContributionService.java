@@ -106,8 +106,11 @@ public class ContributionService {
     @Transactional(readOnly = true)
     public ContributionResponse detail(User user, UUID id) {
         Contribution contribution = contributions.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aporte no encontrado"));
+        UUID creatorId = contribution.getCampaign() == null
+                ? contribution.getCreatorId()
+                : contribution.getCampaign().getCreatorId();
         if (user == null || (user.getRole() != UserRole.SPONSOR || !contribution.getSponsorId().equals(user.getId()))
-                && (user.getRole() != UserRole.CREATOR || !contribution.getCampaign().getCreatorId().equals(user.getId())))
+                && (user.getRole() != UserRole.CREATOR || !user.getId().equals(creatorId)))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tienes permisos para ver este aporte");
         return response(contribution);
     }
@@ -126,6 +129,9 @@ public class ContributionService {
         }
         Payment payment = payments.findByIdForUpdate(paymentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND"));
+        if (payment.getContribution() == null || payment.getContribution().getCampaign() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "PAYMENT_SETTLED_SYNCHRONOUSLY");
+        }
         if (events.findByProviderEventId(providerEventId).isPresent()) return;
         PaymentEvent event = events.save(new PaymentEvent(payment, providerEventId, eventType, sha256(payload)));
         try {
@@ -381,7 +387,7 @@ public class ContributionService {
         if (!c.getSponsorId().equals(sponsor.getId())) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tienes permisos para reintentar este aporte");
         return c;
     }
-    private ContributionResponse response(Contribution c) { Payment p = payments.findFirstByContributionIdOrderByCreatedAtDescIdDesc(c.getId()).orElse(null); UUID rewardId = c.getReward() == null ? null : c.getReward().getId(); return new ContributionResponse(c.getId(), c.getCampaign().getId(), c.getSponsorId(), rewardId, c.getAmount(), c.getCurrency(), c.getStatus(), p == null ? null : new PaymentResponse(p.getId(), p.getStatus()), c.getCreatedAt(), new ContributionView(c.getId(), c.getCampaign().getId(), c.getSponsorId(), rewardId, c.getAmount(), c.getCurrency(), c.getStatus())); }
+    private ContributionResponse response(Contribution c) { Payment p = payments.findFirstByContributionIdOrderByCreatedAtDescIdDesc(c.getId()).orElse(null); UUID rewardId = c.getReward() == null ? null : c.getReward().getId(); UUID campaignId = c.getCampaign() == null ? null : c.getCampaign().getId(); return new ContributionResponse(c.getId(), campaignId, c.getSponsorId(), rewardId, c.getAmount(), c.getCurrency(), c.getStatus(), p == null ? null : new PaymentResponse(p.getId(), p.getStatus()), c.getCreatedAt(), new ContributionView(c.getId(), campaignId, c.getSponsorId(), rewardId, c.getAmount(), c.getCurrency(), c.getStatus()), c.getCreatorId(), c.getSubscriptionId()); }
     private void requireSponsor(User user) { if (user == null || user.getRole() != UserRole.SPONSOR) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Solo los sponsors pueden realizar aportes"); }
     private void validateAmount(BigDecimal amount, String currency) { if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) bad("amount debe ser positivo con máximo dos decimales"); if (currency == null || !currency.trim().matches("[A-Za-z]{3}")) bad("currency debe tener 3 letras"); }
     private void bad(String message) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
@@ -390,7 +396,7 @@ public class ContributionService {
     public record CreateRequest(BigDecimal amount, String currency, UUID rewardId, String paymentMethodId) { }
     public record RetryRequest(String paymentMethodId) { }
     public record PaymentResponse(UUID id, PaymentStatus status) { }
-    public record ContributionResponse(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status, PaymentResponse payment, Instant createdAt, ContributionView contribution) { }
+    public record ContributionResponse(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status, PaymentResponse payment, Instant createdAt, ContributionView contribution, UUID creatorId, UUID subscriptionId) { }
     public record ContributionView(UUID id, UUID campaignId, UUID sponsorId, UUID rewardId, BigDecimal amount, String currency, ContributionStatus status) { }
     public record PageResponse(java.util.List<ContributionResponse> content, int page, int pageSize, long totalElements, int totalPages) { }
 

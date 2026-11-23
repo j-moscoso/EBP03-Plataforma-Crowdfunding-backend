@@ -84,18 +84,21 @@ public class TransactionHistoryService {
 
     private HistoryItem toHistoryItem(Contribution contribution, Payment payment, TransactionReceipt receipt) {
         TransactionReceiptStatus receiptStatus = receipt == null ? null : receipt.getStatus();
+        boolean recurring = contribution.getCampaign() == null;
         return new HistoryItem(
                 contribution.getId(),
                 contribution.getCreatedAt(),
-                contribution.getCampaign().getId(),
-                contribution.getCampaign().getTitle(),
+                recurring ? null : contribution.getCampaign().getId(),
+                recurring ? "Aporte recurrente" : contribution.getCampaign().getTitle(),
                 contribution.getAmount(),
                 contribution.getCurrency(),
                 receipt == null ? null : receipt.getReferenceCode(),
                 receiptStatus,
                 receiptStatus == null ? null : label(receiptStatus),
                 contribution.getStatus(),
-                payment == null ? null : payment.getStatus());
+                payment == null ? null : payment.getStatus(),
+                contribution.getCreatorId(),
+                contribution.getSubscriptionId());
     }
 
     private String label(TransactionReceiptStatus status) {
@@ -142,7 +145,9 @@ public class TransactionHistoryService {
             TransactionReceiptStatus receiptStatus,
             String receiptStatusLabel,
             ContributionStatus contributionStatus,
-            PaymentStatus paymentStatus) {
+            PaymentStatus paymentStatus,
+            UUID creatorId,
+            UUID subscriptionId) {
     }
 
     public record HistoryPageResponse(

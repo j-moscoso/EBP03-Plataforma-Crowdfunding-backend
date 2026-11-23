@@ -86,7 +86,9 @@ public class SampleDataSeeder {
         }
 
         final UUID seedCampaignId = campaignToSeed.getId();
-        boolean alreadyRaised = contributions.findAll().stream().anyMatch(item -> item.getCampaign().getId().equals(seedCampaignId) && item.getStatus() == ContributionStatus.CONFIRMED);
+        boolean alreadyRaised = contributions.findAll().stream().anyMatch(item -> item.getCampaign() != null
+                && item.getCampaign().getId().equals(seedCampaignId)
+                && item.getStatus() == ContributionStatus.CONFIRMED);
         if (!alreadyRaised) {
                 CampaignReward reward = campaignToSeed.getRewards().stream().filter(item -> item.getMinimumAmount().compareTo(new BigDecimal("50.00")) == 0).findFirst().orElse(null);
                 Contribution confirmed = contributions.save(new Contribution(campaignToSeed, sponsor.getId(), reward, new BigDecimal("75.00"), "USD", ContributionStatus.CONFIRMED, "seed-confirmed-75"));

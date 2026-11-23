@@ -16,6 +16,7 @@ import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorP
 import com.ebp03.plataforma_crowdfunding_backend.campaign.api.CampaignUpdatePublicationRequest.UnknownCampaignUpdateFieldException;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignService;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignUpdateValidationException;
+import com.ebp03.plataforma_crowdfunding_backend.subscription.service.SubscriptionService;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.slf4j.Logger;
@@ -121,6 +122,12 @@ public class AuthExceptionHandler {
     ResponseEntity<ApiError> creatorProfileValidation(CreatorProfileValidationException exception) {
         return ResponseEntity.badRequest().body(new ApiError(
                 "VALIDATION_ERROR", "Revisa los campos indicados.", exception.getDetails()));
+    }
+
+    @ExceptionHandler(SubscriptionService.ValidationException.class)
+    ResponseEntity<ApiError> subscriptionValidation(SubscriptionService.ValidationException exception) {
+        return ResponseEntity.badRequest().body(new ApiError(
+                "VALIDATION_ERROR", "Revisa los campos indicados.", exception.getErrors()));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

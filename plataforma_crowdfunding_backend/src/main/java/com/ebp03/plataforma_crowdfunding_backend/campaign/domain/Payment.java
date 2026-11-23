@@ -9,9 +9,11 @@ import java.util.UUID;
 @Table(name = "payments")
 public class Payment {
     @Id private UUID id;
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "contribution_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "contribution_id")
     private Contribution contribution;
+    @Column(name = "subscription_charge_attempt_id", unique = true)
+    private UUID subscriptionChargeAttemptId;
     @Column(nullable = false, length = 40) private String provider;
     @Column(name = "provider_payment_id", unique = true, length = 160) private String providerPaymentId;
     @Column(nullable = false, precision = 19, scale = 2) private BigDecimal amount;
@@ -28,10 +30,19 @@ public class Payment {
         this.id = UUID.randomUUID(); this.contribution = contribution; this.provider = provider;
         this.amount = amount; this.platformFee = platformFee; this.status = PaymentStatus.CREATED;
     }
+    public Payment(Contribution contribution, String provider, BigDecimal amount, BigDecimal platformFee,
+                   UUID subscriptionChargeAttemptId) {
+        this(contribution, provider, amount, platformFee);
+        this.subscriptionChargeAttemptId = subscriptionChargeAttemptId;
+    }
+    public Payment(String provider, BigDecimal amount, BigDecimal platformFee, UUID subscriptionChargeAttemptId) {
+        this(null, provider, amount, platformFee, subscriptionChargeAttemptId);
+    }
     @PrePersist void onCreate() { createdAt = Instant.now(); updatedAt = createdAt; }
     @PreUpdate void onUpdate() { updatedAt = Instant.now(); }
     public UUID getId() { return id; }
     public Contribution getContribution() { return contribution; }
+    public UUID getSubscriptionChargeAttemptId() { return subscriptionChargeAttemptId; }
     public String getProvider() { return provider; }
     public String getProviderPaymentId() { return providerPaymentId; }
     public BigDecimal getAmount() { return amount; }

@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
     Page<Notification> findByRecipientUserId(UUID recipientUserId, Pageable pageable);
     Page<Notification> findByRecipientUserIdAndReadAtIsNull(UUID recipientUserId, Pageable pageable);
+    boolean existsByContributionIdAndType(UUID contributionId, String type);
 
     @Modifying
     @Query(value = """

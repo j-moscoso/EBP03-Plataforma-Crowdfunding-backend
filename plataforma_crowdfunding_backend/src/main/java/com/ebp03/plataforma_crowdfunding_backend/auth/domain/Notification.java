@@ -15,6 +15,8 @@ public class Notification {
     private UUID campaignId;
     @Column(name = "campaign_update_id")
     private UUID campaignUpdateId;
+    @Column(name = "contribution_id")
+    private UUID contributionId;
     @Column(nullable = false, length = 50)
     private String type;
     @Column(nullable = false, length = 160)
@@ -34,10 +36,16 @@ public class Notification {
 
     public Notification(UUID recipientUserId, UUID campaignId, UUID campaignUpdateId,
                         String type, String title, String body) {
+        this(recipientUserId, campaignId, campaignUpdateId, null, type, title, body);
+    }
+
+    public Notification(UUID recipientUserId, UUID campaignId, UUID campaignUpdateId, UUID contributionId,
+                        String type, String title, String body) {
         this.id = UUID.randomUUID();
         this.recipientUserId = recipientUserId;
         this.campaignId = campaignId;
         this.campaignUpdateId = campaignUpdateId;
+        this.contributionId = contributionId;
         this.type = type;
         this.title = title;
         this.body = body;
@@ -50,6 +58,7 @@ public class Notification {
     public UUID getRecipientUserId() { return recipientUserId; }
     public UUID getCampaignId() { return campaignId; }
     public UUID getCampaignUpdateId() { return campaignUpdateId; }
+    public UUID getContributionId() { return contributionId; }
     public String getType() { return type; }
     public String getTitle() { return title; }
     public String getBody() { return body; }

@@ -37,6 +37,7 @@ public class NotificationQueryService {
         List<NotificationResponse> content = notifications.getContent().stream()
                 .map(item -> new NotificationResponse(
                         item.getId(), item.getType(), item.getCampaignId(), item.getCampaignUpdateId(),
+                        item.getContributionId(),
                         item.getTitle(), item.getBody(), item.getReadAt(), item.getCreatedAt()))
                 .toList();
         return new NotificationPageResponse(
