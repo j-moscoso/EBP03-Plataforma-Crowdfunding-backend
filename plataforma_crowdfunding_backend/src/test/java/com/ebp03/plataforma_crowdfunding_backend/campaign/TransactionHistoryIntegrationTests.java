@@ -154,7 +154,7 @@ class TransactionHistoryIntegrationTests {
         UUID contributionId = UUID.fromString(extractValue(successBody, "id", 0));
         UUID paymentId = UUID.fromString(extractValue(successBody, "id", successBody.indexOf("\"payment\"")));
         TransactionReceipt receipt = receiptRepository.findByContributionId(contributionId).orElseThrow();
-        assertEquals(TransactionReceiptStatus.SUCCESSFUL, receipt.getStatus());
+        assertEquals(TransactionReceiptStatus.HELD, receipt.getStatus());
         assertNotNull(receipt.getIssuedAt());
         assertTrue(receipt.getReferenceCode().startsWith("REF-"));
 

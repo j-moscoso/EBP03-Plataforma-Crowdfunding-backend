@@ -21,6 +21,7 @@ public class Payment {
     @Column(name = "failure_message", length = 500) private String failureMessage;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    @Column(name = "refunded_at") private Instant refundedAt;
 
     protected Payment() { }
     public Payment(Contribution contribution, String provider, BigDecimal amount, BigDecimal platformFee) {
@@ -39,7 +40,9 @@ public class Payment {
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getRefundedAt() { return refundedAt; }
     public void setStatus(PaymentStatus status) { this.status = status; }
     public void setProviderPaymentId(String providerPaymentId) { this.providerPaymentId = providerPaymentId; }
     public void setFailure(String code, String message) { this.failureCode = code; this.failureMessage = message; }
+    public void setRefundedAt(Instant refundedAt) { this.refundedAt = refundedAt; }
 }

@@ -353,7 +353,7 @@ class CampaignControllerIntegrationTests {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"amount\":75,\"currency\":\"USD\",\"rewardId\":\"" + reward.getId() + "\",\"paymentMethodId\":\"sim_success\"}"))
                         .andExpect(status().isCreated())
-                        .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                        .andExpect(jsonPath("$.status").value("HELD"))
                         .andExpect(jsonPath("$.payment.status").value("SUCCEEDED"))
                         .andReturn();
                 String contributionId = extractId(confirmed.getResponse().getContentAsString());
@@ -377,7 +377,7 @@ class CampaignControllerIntegrationTests {
                                 .cookie(sponsor).header("Idempotency-Key", "retry-key-1")
                                 .contentType(MediaType.APPLICATION_JSON).content("{\"paymentMethodId\":\"sim_success\"}"))
                         .andExpect(status().isOk())
-                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                        .andExpect(jsonPath("$.status").value("HELD"));
 
                 mockMvc.perform(get("/api/campaigns/{campaignId}/progress", campaign.getId()))
                         .andExpect(status().isOk())
@@ -394,10 +394,10 @@ class CampaignControllerIntegrationTests {
 
                 postContribution(sponsor, campaign.getId(), "capacity-40", 40, "sim_success")
                         .andExpect(status().isCreated())
-                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                        .andExpect(jsonPath("$.status").value("HELD"));
                 postContribution(sponsor, campaign.getId(), "capacity-60", 60, "sim_success")
                         .andExpect(status().isCreated())
-                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                        .andExpect(jsonPath("$.status").value("HELD"));
                 postContribution(sponsor, campaign.getId(), "capacity-1", 1, "sim_success")
                         .andExpect(status().isBadRequest())
                         .andExpect(jsonPath("$.code").value("CONTRIBUTION_EXCEEDS_REMAINING_AMOUNT"));
@@ -423,7 +423,7 @@ class CampaignControllerIntegrationTests {
                 contributionRepository.save(new Contribution(campaign, sponsorUser.getId(), new BigDecimal("80.00"), "USD", ContributionStatus.FAILED));
                 postContribution(sponsor, campaign.getId(), "capacity-after-non-confirmed", 100, "sim_success")
                         .andExpect(status().isCreated())
-                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                        .andExpect(jsonPath("$.status").value("HELD"));
             }
 
             @Test
@@ -439,7 +439,7 @@ class CampaignControllerIntegrationTests {
                         .andReturn();
                 postContribution(sponsor, campaign.getId(), "capacity-consume", 30, "sim_success")
                         .andExpect(status().isCreated())
-                        .andExpect(jsonPath("$.status").value("CONFIRMED"));
+                        .andExpect(jsonPath("$.status").value("HELD"));
                 String failedId = extractId(failed.getResponse().getContentAsString());
                 mockMvc.perform(post("/api/contributions/{contributionId}/retry", failedId)
                                 .cookie(sponsor).header("Idempotency-Key", "capacity-retry")

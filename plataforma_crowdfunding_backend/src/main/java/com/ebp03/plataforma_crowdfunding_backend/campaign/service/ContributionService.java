@@ -155,7 +155,10 @@ public class ContributionService {
             try {
                 confirm(contribution);
                 payment.setStatus(PaymentStatus.SUCCEEDED); payment.setProviderPaymentId(result.providerPaymentId());
-                createOrUpdateReceipt(contribution, TransactionReceiptStatus.SUCCESSFUL);
+                createOrUpdateReceipt(contribution,
+                        contribution.getCampaign().getFundingModel() == FundingModel.FIXED
+                                ? TransactionReceiptStatus.HELD
+                                : TransactionReceiptStatus.SUCCESSFUL);
             } catch (ContributionCapacityException exception) {
                 failForCapacity(contribution, payment, exception);
                 payments.save(payment);
@@ -196,9 +199,15 @@ public class ContributionService {
         if (providerPaymentId != null) payment.setProviderPaymentId(providerPaymentId);
         if (isLatestPayment(payment) && contribution.getStatus() != ContributionStatus.CONFIRMED) {
             confirm(contribution);
-            createOrUpdateReceipt(contribution, TransactionReceiptStatus.SUCCESSFUL);
+            createOrUpdateReceipt(contribution,
+                    contribution.getCampaign().getFundingModel() == FundingModel.FIXED
+                            ? TransactionReceiptStatus.HELD
+                            : TransactionReceiptStatus.SUCCESSFUL);
         } else if (isLatestPayment(payment)) {
-            createOrUpdateReceipt(contribution, TransactionReceiptStatus.SUCCESSFUL);
+            createOrUpdateReceipt(contribution,
+                    contribution.getCampaign().getFundingModel() == FundingModel.FIXED
+                            ? TransactionReceiptStatus.HELD
+                            : TransactionReceiptStatus.SUCCESSFUL);
         }
     }
 
@@ -219,8 +228,10 @@ public class ContributionService {
     private void markRefunded(Contribution contribution, Payment payment) {
         if (payment.getStatus() != PaymentStatus.SUCCEEDED) return;
         payment.setStatus(PaymentStatus.REFUNDED);
+        payment.setRefundedAt(Instant.now());
         if (isLatestPayment(payment)) {
             contribution.setStatus(ContributionStatus.REFUNDED);
+            contribution.setClosedAt(Instant.now());
             receipts.findByContributionId(contribution.getId())
                     .ifPresent(receipt -> receipt.setStatus(TransactionReceiptStatus.REFUNDED));
         }
@@ -246,7 +257,12 @@ public class ContributionService {
         if (contribution.getStatus() == ContributionStatus.CONFIRMED) return;
         Campaign campaign = lockedActiveCampaign(contribution.getCampaign().getId());
         validateRemaining(campaign, contribution.getAmount());
-        contribution.setStatus(ContributionStatus.CONFIRMED); contribution.setConfirmedAt(Instant.now());
+        if (campaign.getFundingModel() == FundingModel.FIXED) {
+            contribution.setStatus(ContributionStatus.HELD);
+        } else {
+            contribution.setStatus(ContributionStatus.CONFIRMED);
+        }
+        contribution.setConfirmedAt(Instant.now());
         CampaignReward reward = contribution.getReward();
         if (reward != null) reward.setClaimedQuantity(reward.getClaimedQuantity() + 1);
     }
@@ -286,9 +302,17 @@ public class ContributionService {
     }
 
     private void validateRemaining(Campaign campaign, BigDecimal amount) {
-        BigDecimal confirmed = contributions.sumAmountByCampaignIdAndStatus(campaign.getId(), ContributionStatus.CONFIRMED);
-        if (confirmed == null) confirmed = BigDecimal.ZERO;
-        BigDecimal remaining = campaign.getGoalAmount().subtract(confirmed).max(BigDecimal.ZERO);
+        BigDecimal raised;
+        if (campaign.getFundingModel() == FundingModel.FIXED) {
+            raised = contributions.sumAmountByCampaignIdStatusesAndCurrency(
+                    campaign.getId(),
+                    java.util.List.of(ContributionStatus.CONFIRMED, ContributionStatus.HELD),
+                    campaign.getCurrency());
+        } else {
+            raised = contributions.sumAmountByCampaignIdAndStatus(campaign.getId(), ContributionStatus.CONFIRMED);
+        }
+        if (raised == null) raised = BigDecimal.ZERO;
+        BigDecimal remaining = campaign.getGoalAmount().subtract(raised).max(BigDecimal.ZERO);
         if (amount.compareTo(remaining) > 0)
             throw new ContributionCapacityException();
     }

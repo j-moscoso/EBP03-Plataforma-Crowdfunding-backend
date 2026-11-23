@@ -45,6 +45,9 @@ public class Contribution {
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
 
+    @Column(name = "closed_at")
+    private Instant closedAt;
+
     @Column(name = "idempotency_key", nullable = false, length = 128)
     private String idempotencyKey;
 
@@ -93,6 +96,7 @@ public class Contribution {
     public String getCurrency() { return currency; }
     public ContributionStatus getStatus() { return status; }
     public Instant getConfirmedAt() { return confirmedAt; }
+    public Instant getClosedAt() { return closedAt; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
@@ -100,4 +104,5 @@ public class Contribution {
     public void setCampaign(Campaign campaign) { this.campaign = campaign; }
     public void setStatus(ContributionStatus status) { this.status = status; }
     public void setConfirmedAt(Instant confirmedAt) { this.confirmedAt = confirmedAt; }
+    public void setClosedAt(Instant closedAt) { this.closedAt = closedAt; }
 }

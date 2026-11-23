@@ -8,6 +8,7 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignDraft;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignMediaType;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.FundingModel;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignReward;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignUpdate;
@@ -55,23 +56,30 @@ public class CampaignService {
     private final CampaignUpdateRepository campaignUpdateRepository;
     private final ContributionRepository contributionRepository;
     private final UserRepository userRepository;
+    private final CampaignClosureService campaignClosureService;
 
     public CampaignService(CampaignDraftRepository campaignDraftRepository,
                           CampaignRepository campaignRepository,
                           CampaignUpdateRepository campaignUpdateRepository,
                           ContributionRepository contributionRepository,
-                          UserRepository userRepository) {
+                          UserRepository userRepository,
+                          CampaignClosureService campaignClosureService) {
         this.campaignDraftRepository = campaignDraftRepository;
         this.campaignRepository = campaignRepository;
         this.campaignUpdateRepository = campaignUpdateRepository;
         this.contributionRepository = contributionRepository;
         this.userRepository = userRepository;
+        this.campaignClosureService = campaignClosureService;
     }
 
     @Transactional
     public DraftResponse createDraft(User creator, DraftCreateRequest request) {
         requireActiveCreator(creator);
         List<FieldError> errors = validateDraftFields(request.goalAmount(), request.durationDays(), request.category(), request.rewards());
+        FundingModel fundingModel = parseFundingModel(request.fundingModel(), true);
+        if (request.fundingModel() != null && fundingModel == null) {
+            errors.add(new FieldError("fundingModel", "INVALID"));
+        }
         String currency = normalizeCurrency(request.currency());
         if (request.currency() != null && currency == null) {
             errors.add(new FieldError("currency", "INVALID"));
@@ -91,7 +99,8 @@ public class CampaignService {
                 normalizeCategory(request.category()),
                 request.mediaUrl(),
                 currency,
-                mediaType);
+                mediaType,
+                fundingModel);
         draft.setCompletionPercentage(calculateCompletionPercentage(draft));
         if (request.rewards() != null && !request.rewards().isEmpty()) {
             List<DraftReward> rewards = new ArrayList<>();
@@ -142,6 +151,9 @@ public class CampaignService {
         CampaignMediaType mediaType = request.mediaType() != null
                 ? parseMediaType(request.mediaType())
                 : draft.getMediaType();
+        FundingModel fundingModel = request.fundingModel() != null
+                ? parseFundingModel(request.fundingModel(), false)
+                : draft.getFundingModel();
 
         List<FieldError> errors = validateDraftFields(goalAmount, durationDays, category, request.rewards() != null ? request.rewards() : convertRewards(draft.getRewards()));
         if (request.currency() != null && currency == null) {
@@ -149,6 +161,9 @@ public class CampaignService {
         }
         if (request.mediaType() != null && mediaType == null) {
             errors.add(new FieldError("mediaType", "INVALID"));
+        }
+        if (request.fundingModel() != null && fundingModel == null) {
+            errors.add(new FieldError("fundingModel", "INVALID"));
         }
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
 
@@ -160,6 +175,7 @@ public class CampaignService {
         draft.setMediaUrl(mediaUrl);
         draft.setMediaType(mediaType);
         draft.setCurrency(currency);
+        draft.setFundingModel(fundingModel);
         draft.setCompletionPercentage(calculateCompletionPercentage(draft));
         draft.setSavedAt(Instant.now());
 
@@ -214,6 +230,7 @@ public class CampaignService {
                 draft.getMediaUrl(),
                 draft.getCurrency(),
                 draft.getMediaType(),
+                draft.getFundingModel(),
                 CampaignStatus.ACTIVE);
         campaign.setPublishedAt(now);
         campaign = campaignRepository.save(campaign);
@@ -304,17 +321,40 @@ public class CampaignService {
 
     @Transactional
     public void closeExpiredCampaigns() {
-        List<Campaign> campaigns = campaignRepository.findAll();
-        Instant now = Instant.now();
-        for (Campaign campaign : campaigns) {
-            if (campaign.getStatus() == CampaignStatus.ACTIVE && !campaign.getDeadline().isAfter(now)) {
-                CampaignStatus nextStatus = progress(campaign).raisedAmount().compareTo(campaign.getGoalAmount()) >= 0
-                        ? CampaignStatus.SUCCESSFUL
-                        : CampaignStatus.FAILED;
-                campaign.setStatus(nextStatus);
-                campaignRepository.save(campaign);
-            }
+        campaignClosureService.processExpiredCampaigns(Instant.now());
+    }
+
+    @Transactional
+    public FundingModelResponse updateFundingModel(User creator, UUID campaignId, FundingModelUpdateRequest request) {
+        requireActiveCreator(creator);
+        if (request == null) {
+            throw new FieldValidationException(List.of(new FieldError("fundingModel", "REQUIRED")));
         }
+        FundingModel fundingModel = parseFundingModel(request.fundingModel(), false);
+        if (fundingModel == null) {
+            throw new FieldValidationException(List.of(new FieldError("fundingModel", "INVALID")));
+        }
+
+        Campaign campaign = campaignRepository.findByIdForUpdate(campaignId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Campaña no encontrada"));
+        if (!campaign.getCreatorId().equals(creator.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "No tienes permisos para modificar esta campaña");
+        }
+        if (campaign.getStatus() == CampaignStatus.SUCCESSFUL
+                || campaign.getStatus() == CampaignStatus.FAILED
+                || campaign.getStatus() == CampaignStatus.CANCELLED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "FUNDING_MODEL_IMMUTABLE");
+        }
+        if (!campaign.getDeadline().isAfter(Instant.now())
+                || contributionRepository.existsByCampaignIdAndStatus(campaignId, ContributionStatus.CONFIRMED)
+                || contributionRepository.existsByCampaignIdAndStatus(campaignId, ContributionStatus.HELD)
+                || contributionRepository.existsByCampaignIdAndStatus(campaignId, ContributionStatus.PENDING)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "FUNDING_MODEL_ALREADY_IN_USE");
+        }
+
+        campaign.setFundingModel(fundingModel);
+        campaignRepository.save(campaign);
+        return new FundingModelResponse(campaign.getId(), campaign.getFundingModel(), campaign.getUpdatedAt());
     }
 
     private void requireActiveCreator(User user) {
@@ -337,6 +377,7 @@ public class CampaignService {
                 campaign.getMediaType(),
                 canonicalCurrency(campaign.getCurrency()),
                 campaignCurrencyStatus(campaign),
+                campaign.getFundingModel(),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
                 campaign.getCreatedAt(),
@@ -359,6 +400,7 @@ public class CampaignService {
                 campaign.getMediaType(),
                 canonicalCurrency(campaign.getCurrency()),
                 campaignCurrencyStatus(campaign),
+                campaign.getFundingModel(),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
                 progress(campaign)
@@ -379,7 +421,14 @@ public class CampaignService {
     }
 
     private CampaignProgress progress(Campaign campaign) {
-        BigDecimal raised = contributionRepository.sumAmountByCampaignIdAndStatus(campaign.getId(), ContributionStatus.CONFIRMED);
+        BigDecimal raised;
+        if (campaign.getFundingModel() == FundingModel.FIXED) {
+            raised = contributionRepository.sumAmountByCampaignIdAndStatuses(
+                    campaign.getId(), List.of(ContributionStatus.CONFIRMED, ContributionStatus.HELD));
+        } else {
+            raised = contributionRepository.sumAmountByCampaignIdAndStatus(
+                    campaign.getId(), ContributionStatus.CONFIRMED);
+        }
         if (raised == null) raised = BigDecimal.ZERO;
 
         BigDecimal goal = campaign.getGoalAmount();
@@ -394,7 +443,18 @@ public class CampaignService {
             if (percentage > 100) percentage = 100;
         }
 
-        long sponsorsCount = contributionRepository.countDistinctSponsorByCampaignIdAndStatus(campaign.getId(), ContributionStatus.CONFIRMED);
+        long sponsorsCount;
+        if (campaign.getFundingModel() == FundingModel.FIXED) {
+            sponsorsCount = Objects.requireNonNullElse(
+                    contributionRepository.countDistinctSponsorByCampaignIdAndStatuses(
+                            campaign.getId(), List.of(ContributionStatus.CONFIRMED, ContributionStatus.HELD)),
+                    0L);
+        } else {
+            sponsorsCount = Objects.requireNonNullElse(
+                    contributionRepository.countDistinctSponsorByCampaignIdAndStatus(
+                            campaign.getId(), ContributionStatus.CONFIRMED),
+                    0L);
+        }
         if (sponsorsCount < 0) sponsorsCount = 0;
 
         long secondsRemaining = Math.max(0L, campaign.getDeadline().getEpochSecond() - Instant.now().getEpochSecond());
@@ -548,7 +608,22 @@ public class CampaignService {
         }
     }
 
+    private FundingModel parseFundingModel(String value, boolean omittedDefaultsToFixed) {
+        if (value == null || value.isBlank()) {
+            return omittedDefaultsToFixed ? FundingModel.FIXED : null;
+        }
+        try {
+            return FundingModel.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+
     public record RewardRequest(String title, String description, BigDecimal minimumAmount) { }
+
+    public record FundingModelUpdateRequest(String fundingModel) { }
+
+    public record FundingModelResponse(UUID campaignId, FundingModel fundingModel, Instant updatedAt) { }
 
     public record DraftCreateRequest(String title,
                                      String description,
@@ -558,7 +633,8 @@ public class CampaignService {
                                      String mediaUrl,
                                      List<RewardRequest> rewards,
                                      String currency,
-                                     String mediaType) { }
+                                     String mediaType,
+                                     String fundingModel) { }
 
     public record DraftUpdateRequest(String title,
                                      String description,
@@ -568,7 +644,8 @@ public class CampaignService {
                                      String mediaUrl,
                                      List<RewardRequest> rewards,
                                      String currency,
-                                     String mediaType) { }
+                                     String mediaType,
+                                     String fundingModel) { }
 
     public record PageResponse<T>(List<T> content,
                                   int page,
@@ -589,6 +666,7 @@ public class CampaignService {
                                String mediaUrl,
                                CampaignMediaType mediaType,
                                String currency,
+                               FundingModel fundingModel,
                                List<RewardResponse> rewards,
                                Integer completionPercentage,
                                Instant savedAt,
@@ -605,6 +683,7 @@ public class CampaignService {
                     draft.getMediaUrl(),
                     draft.getMediaType(),
                     draft.getCurrency(),
+                    draft.getFundingModel(),
                     draft.getRewards().stream()
                             .sorted((left, right) -> Integer.compare(left.getSortOrder(), right.getSortOrder()))
                             .map(reward -> new RewardResponse(reward.getId(), reward.getTitle(), reward.getDescription(), reward.getMinimumAmount(), null, null))
@@ -638,6 +717,7 @@ public class CampaignService {
                                          CampaignMediaType mediaType,
                                          String currency,
                                          String currencyStatus,
+                                         FundingModel fundingModel,
                                          CampaignStatus status,
                                          Instant publishedAt,
                                          CampaignProgress progress) { }
@@ -653,6 +733,7 @@ public class CampaignService {
                                         CampaignMediaType mediaType,
                                         String currency,
                                         String currencyStatus,
+                                        FundingModel fundingModel,
                                         CampaignStatus status,
                                         Instant publishedAt,
                                         Instant createdAt,

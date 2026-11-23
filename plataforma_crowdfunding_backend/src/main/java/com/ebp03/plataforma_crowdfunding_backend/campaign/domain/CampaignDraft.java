@@ -51,6 +51,10 @@ public class CampaignDraft {
     @Column(length = 3)
     private String currency;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "funding_model", nullable = false, length = 20)
+    private FundingModel fundingModel = FundingModel.FIXED;
+
     @Column(name = "completion_percentage", nullable = false)
     private Integer completionPercentage;
 
@@ -83,6 +87,13 @@ public class CampaignDraft {
     public CampaignDraft(UUID creatorId, String title, String description, BigDecimal goalAmount,
                         Integer durationDays, String category, String mediaUrl, String currency,
                         CampaignMediaType mediaType) {
+        this(creatorId, title, description, goalAmount, durationDays, category, mediaUrl, currency,
+                mediaType, FundingModel.FIXED);
+    }
+
+    public CampaignDraft(UUID creatorId, String title, String description, BigDecimal goalAmount,
+                        Integer durationDays, String category, String mediaUrl, String currency,
+                        CampaignMediaType mediaType, FundingModel fundingModel) {
         this.id = UUID.randomUUID();
         this.creatorId = creatorId;
         this.title = title;
@@ -93,6 +104,7 @@ public class CampaignDraft {
         this.mediaUrl = mediaUrl;
         this.mediaType = mediaType == null ? CampaignMediaType.IMAGE : mediaType;
         this.currency = currency;
+        this.fundingModel = fundingModel == null ? FundingModel.FIXED : fundingModel;
         this.completionPercentage = 0;
         this.savedAt = Instant.now();
     }
@@ -122,6 +134,7 @@ public class CampaignDraft {
     public String getMediaUrl() { return mediaUrl; }
     public CampaignMediaType getMediaType() { return mediaType; }
     public String getCurrency() { return currency; }
+    public FundingModel getFundingModel() { return fundingModel; }
     public Integer getCompletionPercentage() { return completionPercentage; }
     public Instant getSavedAt() { return savedAt; }
     public Instant getCreatedAt() { return createdAt; }
@@ -136,6 +149,7 @@ public class CampaignDraft {
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
     public void setMediaType(CampaignMediaType mediaType) { this.mediaType = mediaType; }
     public void setCurrency(String currency) { this.currency = currency; }
+    public void setFundingModel(FundingModel fundingModel) { this.fundingModel = fundingModel == null ? FundingModel.FIXED : fundingModel; }
     public void setCompletionPercentage(Integer completionPercentage) { this.completionPercentage = completionPercentage; }
     public void setSavedAt(Instant savedAt) { this.savedAt = savedAt; }
     public void setRewards(List<DraftReward> rewards) { this.rewards.clear(); if (rewards != null) { this.rewards.addAll(rewards); for (DraftReward reward : this.rewards) { reward.setDraft(this); } } }

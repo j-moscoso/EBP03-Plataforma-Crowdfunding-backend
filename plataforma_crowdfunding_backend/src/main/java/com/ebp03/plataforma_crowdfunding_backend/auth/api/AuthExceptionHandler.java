@@ -14,6 +14,8 @@ import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorP
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.service.CreatorProfileValidationException;
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorProfileRequest.UnknownCreatorProfileFieldException;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.api.CampaignUpdatePublicationRequest.UnknownCampaignUpdateFieldException;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignService;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignUpdateValidationException;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.slf4j.Logger;
@@ -98,6 +100,20 @@ public class AuthExceptionHandler {
                         error.getDefaultMessage()))
                 .toList();
         return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", details));
+    }
+
+    @ExceptionHandler(CampaignService.FieldValidationException.class)
+    ResponseEntity<Object> campaignFieldValidation(CampaignService.FieldValidationException exception) {
+        if (exception.getErrors().isEmpty()) {
+            return ResponseEntity.badRequest().body(new CampaignService.FieldError("", "INVALID"));
+        }
+        return ResponseEntity.badRequest().body(exception.getErrors().getFirst());
+    }
+
+    @ExceptionHandler(CampaignUpdateValidationException.class)
+    ResponseEntity<ApiError> campaignUpdateValidation(CampaignUpdateValidationException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", exception.getDetails()));
     }
 
     @ExceptionHandler(CreatorProfileValidationException.class)
