@@ -1,0 +1,2 @@
+ALTER TABLE contributions
+    ADD COLUMN is_anonymous BOOLEAN NOT NULL DEFAULT FALSE;

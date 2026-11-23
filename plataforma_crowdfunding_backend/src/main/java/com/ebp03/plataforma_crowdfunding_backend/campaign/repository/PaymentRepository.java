@@ -1,6 +1,7 @@
 package com.ebp03.plataforma_crowdfunding_backend.campaign.repository;
 
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Payment;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.PaymentStatus;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,6 +14,8 @@ import jakarta.persistence.LockModeType;
 public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     Optional<Payment> findFirstByContributionIdOrderByCreatedAtDesc(UUID contributionId);
     Optional<Payment> findFirstByContributionIdOrderByCreatedAtDescIdDesc(UUID contributionId);
+    Optional<Payment> findFirstByContributionIdAndStatusOrderByCreatedAtDescIdDesc(
+            UUID contributionId, PaymentStatus status);
     List<Payment> findByContributionIdInOrderByCreatedAtDescIdDesc(List<UUID> contributionIds);
     Optional<Payment> findByProviderPaymentId(String providerPaymentId);
 

@@ -26,3 +26,65 @@ HIBERNATE_DIALECT=org.hibernate.dialect.PostgreSQLDialect
 ```
 
 Los valores por defecto usan H2 para desarrollo local y pruebas.
+
+## Aportes recurrentes a creadores
+
+El backend expone `POST /api/subscriptions`, `GET /api/subscriptions/me` y
+`POST /api/subscriptions/{subscriptionId}/cancel`. Todas las operaciones requieren
+la sesión `AUTH_SESSION`; el patrocinador se obtiene de esa sesión y nunca del
+cuerpo de la solicitud.
+
+El primer cobro usa el `PaymentProvider` existente. En el proveedor simulado,
+`sim_success` aprueba el cobro y `sim_failure` simula fondos insuficientes; otras
+referencias se rechazan. Solo se conserva la referencia de pago aceptada por el
+proveedor, nunca datos de tarjeta o credenciales.
+
+La tarea programada procesa suscripciones `ACTIVE` vencidas cada 60 segundos
+(configurable con `app.subscription.renewal-fixed-delay-ms`). Cada renovación se
+bloquea por suscripción y utiliza una clave determinista
+`subscription:{id}:charge:{epochSeconds}`. Las contribuciones, pagos,
+comprobantes, intentos y notificaciones se escriben en la misma transacción.
+La creación bloquea la fila del creador para serializar altas concurrentes y
+evitar más de una suscripción activa por pareja patrocinador-creador. Cada
+ejecución procesa como máximo 20 renovaciones.
+Los fallos quedan en `subscription_charge_attempts` y `payments`, sin crear una
+contribución o comprobante exitoso; la suscripción sigue `ACTIVE` y se reintenta
+un mes después. Los cobros exitosos generan una contribución `CONFIRMED`, un
+comprobante `SUCCESSFUL` y una notificación al creador.
+
+## Notificaciones de nuevos aportes
+
+Cuando un cobro de campaña se confirma, `ContributionService` persiste una
+notificación `NEW_CONTRIBUTION` para el creador en la misma transacción del
+pago y el comprobante. En campañas fijas el aporte y comprobante quedan
+`HELD`; en campañas flexibles quedan `CONFIRMED` y `SUCCESSFUL`. El nombre del
+patrocinador se escapa como texto, o se presenta como `Anónimo` si así lo
+solicitó o no tiene nombre disponible. El cuerpo usa el monto validado con dos
+decimales y la moneda de la contribución.
+
+La unicidad existente por `contribution_id` y tipo, junto con la verificación
+del destinatario, evita duplicados por reintentos o webhooks. `GET
+/api/notifications/me` calcula `unreadCount` en la base de datos para el usuario
+autenticado; `unreadOnly=true` filtra la página sin cambiar ese conteo global.
+Marcar como leída es idempotente y queda limitado al propietario.
+
+Las fechas mensuales se calculan en UTC con `ZonedDateTime.plusMonths(1)`. Por
+ejemplo, una fecha de cobro el 31 se ajusta al último día válido del mes
+siguiente. Las pruebas backend se ejecutan desde `plataforma_crowdfunding_backend`
+con `mvn test`.
+
+## Reembolsos de campañas fijas fallidas
+
+`CampaignClosureService` procesa campañas activas vencidas cada minuto y
+también puede ejecutarse desde el servicio de campañas. Si una campaña `FIXED`
+queda bajo la meta, la misma transacción marca la campaña `FAILED` y solo
+cambia aportes `HELD` a `REFUNDED`; actualiza el pago exitoso más reciente, el
+comprobante existente y sus fechas, y persiste una notificación interna por
+aporte. No se realiza una transferencia externa. Los cierres se serializan con
+bloqueo pesimista de campaña y reejecutarlos no duplica notificaciones.
+
+El historial y detalle existentes están disponibles también en
+`/api/transactions/me` y `/api/transactions/{contributionId}`. El detalle
+expone la descripción de retención únicamente mientras el aporte y comprobante
+estén `HELD` y la campaña siga `ACTIVE`; tras el cierre muestra el estado
+`REFUNDED`, conserva el código original del comprobante y expone la fecha.

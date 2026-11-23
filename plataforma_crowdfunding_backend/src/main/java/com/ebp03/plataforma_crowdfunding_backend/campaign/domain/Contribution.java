@@ -22,7 +22,7 @@ public class Contribution {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "campaign_id", nullable = false)
+    @JoinColumn(name = "campaign_id")
     private Campaign campaign;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -31,6 +31,15 @@ public class Contribution {
 
     @Column(name = "sponsor_id", nullable = false)
     private UUID sponsorId;
+
+    @Column(name = "creator_id")
+    private UUID creatorId;
+
+    @Column(name = "subscription_id")
+    private UUID subscriptionId;
+
+    @Column(name = "is_anonymous", nullable = false)
+    private boolean anonymous;
 
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
@@ -44,6 +53,9 @@ public class Contribution {
 
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
+
+    @Column(name = "closed_at")
+    private Instant closedAt;
 
     @Column(name = "idempotency_key", nullable = false, length = 128)
     private String idempotencyKey;
@@ -63,10 +75,28 @@ public class Contribution {
 
     public Contribution(Campaign campaign, UUID sponsorId, CampaignReward reward, BigDecimal amount,
                         String currency, ContributionStatus status, String idempotencyKey) {
+        this(campaign, sponsorId, reward, amount, currency, status, idempotencyKey, false);
+    }
+
+    public Contribution(Campaign campaign, UUID sponsorId, CampaignReward reward, BigDecimal amount,
+                        String currency, ContributionStatus status, String idempotencyKey, boolean anonymous) {
         this.id = UUID.randomUUID();
         this.campaign = campaign;
         this.sponsorId = sponsorId;
         this.reward = reward;
+        this.amount = amount;
+        this.currency = currency;
+        this.status = status;
+        this.idempotencyKey = idempotencyKey;
+        this.anonymous = anonymous;
+    }
+
+    public Contribution(UUID sponsorId, UUID creatorId, UUID subscriptionId, BigDecimal amount,
+                        String currency, ContributionStatus status, String idempotencyKey) {
+        this.id = UUID.randomUUID();
+        this.sponsorId = sponsorId;
+        this.creatorId = creatorId;
+        this.subscriptionId = subscriptionId;
         this.amount = amount;
         this.currency = currency;
         this.status = status;
@@ -88,11 +118,15 @@ public class Contribution {
     public UUID getId() { return id; }
     public Campaign getCampaign() { return campaign; }
     public UUID getSponsorId() { return sponsorId; }
+    public UUID getCreatorId() { return creatorId; }
+    public UUID getSubscriptionId() { return subscriptionId; }
+    public boolean isAnonymous() { return anonymous; }
     public CampaignReward getReward() { return reward; }
     public BigDecimal getAmount() { return amount; }
     public String getCurrency() { return currency; }
     public ContributionStatus getStatus() { return status; }
     public Instant getConfirmedAt() { return confirmedAt; }
+    public Instant getClosedAt() { return closedAt; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
@@ -100,4 +134,5 @@ public class Contribution {
     public void setCampaign(Campaign campaign) { this.campaign = campaign; }
     public void setStatus(ContributionStatus status) { this.status = status; }
     public void setConfirmedAt(Instant confirmedAt) { this.confirmedAt = confirmedAt; }
+    public void setClosedAt(Instant closedAt) { this.closedAt = closedAt; }
 }

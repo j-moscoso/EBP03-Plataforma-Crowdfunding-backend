@@ -13,6 +13,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 public interface ContributionRepository extends JpaRepository<Contribution, UUID> {
+    List<Contribution> findByCampaignIdAndStatus(UUID campaignId, ContributionStatus status);
+    boolean existsByCampaignIdAndStatus(UUID campaignId, ContributionStatus status);
+    @Query("select coalesce(sum(c.amount), 0) from Contribution c where c.campaign.id = :campaignId and c.status in :statuses")
+    BigDecimal sumAmountByCampaignIdAndStatuses(@Param("campaignId") UUID campaignId, @Param("statuses") List<ContributionStatus> statuses);
+    @Query("select coalesce(sum(c.amount), 0) from Contribution c where c.campaign.id = :campaignId and c.status in :statuses and upper(c.currency) = upper(:currency)")
+    BigDecimal sumAmountByCampaignIdStatusesAndCurrency(@Param("campaignId") UUID campaignId,
+                                                        @Param("statuses") List<ContributionStatus> statuses,
+                                                        @Param("currency") String currency);
     java.util.Optional<Contribution> findBySponsorIdAndIdempotencyKey(UUID sponsorId, String idempotencyKey);
     @EntityGraph(attributePaths = "campaign")
     org.springframework.data.domain.Page<Contribution> findBySponsorId(UUID sponsorId, org.springframework.data.domain.Pageable pageable);
@@ -132,6 +140,8 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
 
     @Query("select count(distinct c.sponsorId) from Contribution c where c.campaign.id = :campaignId and c.status = :status")
     Long countDistinctSponsorByCampaignIdAndStatus(@Param("campaignId") UUID campaignId, @Param("status") ContributionStatus status);
+    @Query("select count(distinct c.sponsorId) from Contribution c where c.campaign.id = :campaignId and c.status in :statuses")
+    Long countDistinctSponsorByCampaignIdAndStatuses(@Param("campaignId") UUID campaignId, @Param("statuses") List<ContributionStatus> statuses);
     @Query("select distinct c.sponsorId from Contribution c where c.campaign.id = :campaignId and c.status = :status and c.sponsorId <> :creatorId")
     List<UUID> findDistinctSponsorIdsByCampaignIdAndStatusExcludingCreator(
             @Param("campaignId") UUID campaignId,

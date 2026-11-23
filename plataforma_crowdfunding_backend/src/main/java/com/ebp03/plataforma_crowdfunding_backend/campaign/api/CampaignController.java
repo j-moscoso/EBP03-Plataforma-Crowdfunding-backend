@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -65,6 +66,14 @@ public class CampaignController {
     public ResponseEntity<CampaignService.CampaignDetailResponse> publishDraft(@AuthenticationPrincipal User creator,
                                                                               @PathVariable UUID draftId) {
         return ResponseEntity.status(201).body(campaignService.publishDraft(creator, draftId));
+    }
+
+    @PatchMapping("/campaigns/{campaignId}/funding-model")
+    public ResponseEntity<CampaignService.FundingModelResponse> updateFundingModel(
+            @AuthenticationPrincipal User creator,
+            @PathVariable UUID campaignId,
+            @RequestBody CampaignService.FundingModelUpdateRequest request) {
+        return ResponseEntity.ok(campaignService.updateFundingModel(creator, campaignId, request));
     }
 
     @GetMapping("/campaigns")

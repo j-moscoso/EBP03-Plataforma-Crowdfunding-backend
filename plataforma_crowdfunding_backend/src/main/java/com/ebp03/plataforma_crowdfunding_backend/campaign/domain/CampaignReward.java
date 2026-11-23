@@ -11,6 +11,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -35,6 +36,9 @@ public class CampaignReward {
     @Column(nullable = true)
     private Integer quantity;
 
+    @Column(name = "estimated_delivery_date")
+    private LocalDate estimatedDeliveryDate;
+
     @Column(name = "claimed_quantity", nullable = false)
     private Integer claimedQuantity;
 
@@ -49,6 +53,12 @@ public class CampaignReward {
 
     public CampaignReward(Campaign campaign, String title, String description,
                          BigDecimal minimumAmount, Integer quantity, Integer claimedQuantity) {
+        this(campaign, title, description, minimumAmount, quantity, claimedQuantity, null);
+    }
+
+    public CampaignReward(Campaign campaign, String title, String description,
+                         BigDecimal minimumAmount, Integer quantity, Integer claimedQuantity,
+                         LocalDate estimatedDeliveryDate) {
         this.id = UUID.randomUUID();
         this.campaign = campaign;
         this.title = title;
@@ -56,6 +66,7 @@ public class CampaignReward {
         this.minimumAmount = minimumAmount;
         this.quantity = quantity;
         this.claimedQuantity = claimedQuantity == null ? 0 : claimedQuantity;
+        this.estimatedDeliveryDate = estimatedDeliveryDate;
     }
 
     @PrePersist
@@ -79,10 +90,16 @@ public class CampaignReward {
     public String getDescription() { return description; }
     public BigDecimal getMinimumAmount() { return minimumAmount; }
     public Integer getQuantity() { return quantity; }
+    public LocalDate getEstimatedDeliveryDate() { return estimatedDeliveryDate; }
     public Integer getClaimedQuantity() { return claimedQuantity; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
     public void setCampaign(Campaign campaign) { this.campaign = campaign; }
+    public void setTitle(String title) { this.title = title; }
+    public void setDescription(String description) { this.description = description; }
+    public void setMinimumAmount(BigDecimal minimumAmount) { this.minimumAmount = minimumAmount; }
+    public void setQuantity(Integer quantity) { this.quantity = quantity; }
+    public void setEstimatedDeliveryDate(LocalDate estimatedDeliveryDate) { this.estimatedDeliveryDate = estimatedDeliveryDate; }
     public void setClaimedQuantity(Integer claimedQuantity) { this.claimedQuantity = claimedQuantity; }
 }

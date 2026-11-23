@@ -13,6 +13,9 @@ public class SimulatedPaymentProvider implements PaymentProvider {
         if ("failure".equalsIgnoreCase(paymentMethodId) || "sim_failure".equalsIgnoreCase(paymentMethodId)) {
             return new Result(false, null, "SIMULATED_FAILURE");
         }
-        return new Result(true, "sim_" + UUID.randomUUID(), null);
+        if ("sim_success".equalsIgnoreCase(paymentMethodId)) {
+            return new Result(true, "sim_" + UUID.randomUUID(), null);
+        }
+        return new Result(false, null, "PAYMENT_METHOD_INVALID");
     }
 }

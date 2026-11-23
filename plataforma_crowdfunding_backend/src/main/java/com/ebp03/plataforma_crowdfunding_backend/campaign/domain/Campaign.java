@@ -52,6 +52,10 @@ public class Campaign {
     private String currency;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "funding_model", nullable = false, length = 20)
+    private FundingModel fundingModel = FundingModel.FIXED;
+
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CampaignStatus status;
 
@@ -87,6 +91,13 @@ public class Campaign {
     public Campaign(UUID creatorId, String title, String description, BigDecimal goalAmount,
                    Instant deadline, String category, String mediaUrl, String currency,
                    CampaignMediaType mediaType, CampaignStatus status) {
+        this(creatorId, title, description, goalAmount, deadline, category, mediaUrl, currency,
+                mediaType, FundingModel.FIXED, status);
+    }
+
+    public Campaign(UUID creatorId, String title, String description, BigDecimal goalAmount,
+                   Instant deadline, String category, String mediaUrl, String currency,
+                   CampaignMediaType mediaType, FundingModel fundingModel, CampaignStatus status) {
         this.id = UUID.randomUUID();
         this.creatorId = creatorId;
         this.title = title;
@@ -97,6 +108,7 @@ public class Campaign {
         this.mediaUrl = mediaUrl;
         this.mediaType = mediaType == null ? CampaignMediaType.IMAGE : mediaType;
         this.currency = currency;
+        this.fundingModel = fundingModel == null ? FundingModel.FIXED : fundingModel;
         this.status = status;
     }
 
@@ -125,6 +137,7 @@ public class Campaign {
     public String getMediaUrl() { return mediaUrl; }
     public CampaignMediaType getMediaType() { return mediaType; }
     public String getCurrency() { return currency; }
+    public FundingModel getFundingModel() { return fundingModel; }
     public CampaignStatus getStatus() { return status; }
     public Instant getPublishedAt() { return publishedAt; }
     public Instant getCreatedAt() { return createdAt; }
@@ -140,6 +153,7 @@ public class Campaign {
     public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
     public void setMediaType(CampaignMediaType mediaType) { this.mediaType = mediaType; }
     public void setCurrency(String currency) { this.currency = currency; }
+    public void setFundingModel(FundingModel fundingModel) { this.fundingModel = fundingModel == null ? FundingModel.FIXED : fundingModel; }
     public void setStatus(CampaignStatus status) { this.status = status; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
     public void setRewards(List<CampaignReward> rewards) { this.rewards.clear(); if (rewards != null) { this.rewards.addAll(rewards); for (CampaignReward reward : this.rewards) { reward.setCampaign(this); } } }
