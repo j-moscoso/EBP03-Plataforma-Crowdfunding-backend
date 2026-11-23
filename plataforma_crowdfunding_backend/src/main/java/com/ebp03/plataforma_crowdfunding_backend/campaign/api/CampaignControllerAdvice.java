@@ -11,6 +11,30 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class CampaignControllerAdvice {
+    @ExceptionHandler(com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignDiscussionService.DiscussionFieldValidationException.class)
+    public ResponseEntity<ApiError> handleDiscussionValidation(
+            com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignDiscussionService.DiscussionFieldValidationException exception) {
+        return ResponseEntity.badRequest().body(new ApiError(
+                "VALIDATION_ERROR", "Revisa los campos indicados.", exception.getDetails()));
+    }
+
+    @ExceptionHandler(CampaignDiscussionRequest.UnknownDiscussionFieldException.class)
+    public ResponseEntity<ApiError> handleUnknownDiscussionField(
+            CampaignDiscussionRequest.UnknownDiscussionFieldException exception) {
+        return unknownDiscussionField(exception.getField());
+    }
+
+    @ExceptionHandler(CampaignFaqRequest.UnknownDiscussionFieldException.class)
+    public ResponseEntity<ApiError> handleUnknownFaqField(
+            CampaignFaqRequest.UnknownDiscussionFieldException exception) {
+        return unknownDiscussionField(exception.getField());
+    }
+
+    private ResponseEntity<ApiError> unknownDiscussionField(String field) {
+        return ResponseEntity.badRequest().body(new ApiError(
+                "VALIDATION_ERROR", "Revisa los campos indicados.",
+                List.of(new ValidationErrorDetail(field, "UNKNOWN_FIELD", "El campo no está permitido."))));
+    }
     @ExceptionHandler(CampaignService.FieldValidationException.class)
     public ResponseEntity<ApiError> handleFieldValidation(CampaignService.FieldValidationException exception) {
         List<ValidationErrorDetail> details = exception.getErrors().stream()

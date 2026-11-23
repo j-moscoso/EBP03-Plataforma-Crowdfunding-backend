@@ -15,6 +15,7 @@ import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.service.CreatorP
 import com.ebp03.plataforma_crowdfunding_backend.creatorprofile.api.SaveCreatorProfileRequest.UnknownCreatorProfileFieldException;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.api.CampaignUpdatePublicationRequest.UnknownCampaignUpdateFieldException;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignService;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignDiscussionService;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.CampaignUpdateValidationException;
 import com.ebp03.plataforma_crowdfunding_backend.subscription.service.SubscriptionService;
 import java.util.List;
@@ -114,6 +115,13 @@ public class AuthExceptionHandler {
 
     @ExceptionHandler(CampaignUpdateValidationException.class)
     ResponseEntity<ApiError> campaignUpdateValidation(CampaignUpdateValidationException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", exception.getDetails()));
+    }
+
+    @ExceptionHandler(CampaignDiscussionService.DiscussionFieldValidationException.class)
+    ResponseEntity<ApiError> discussionFieldValidation(
+            CampaignDiscussionService.DiscussionFieldValidationException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", exception.getDetails()));
     }
