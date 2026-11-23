@@ -20,11 +20,13 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignDraft;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.DraftReward;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignDraftRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRewardRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.ContributionService;
 import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -58,6 +60,9 @@ class CampaignControllerIntegrationTests {
         @Autowired
         private CampaignDraftRepository campaignDraftRepository;
 
+        @Autowired
+        private CampaignRewardRepository campaignRewardRepository;
+
     @Autowired
     private ContributionRepository contributionRepository;
 
@@ -71,10 +76,13 @@ class CampaignControllerIntegrationTests {
         MvcResult created = mockMvc.perform(post("/api/drafts")
                         .cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"Bosques del futuro\",\"description\":\"Proyecto de reforestación\",\"goalAmount\":25000,\"durationDays\":45,\"category\":\"Medio ambiente\",\"mediaUrl\":\"https://cdn.example.com/forest.jpg\",\"rewards\":[{\"title\":\"Agradecimiento\",\"description\":\"Mención virtual\",\"minimumAmount\":10},{\"title\":\"Kit de apoyo\",\"description\":\"Recompensa física\",\"minimumAmount\":50}] }"))
+                        .content("{\"title\":\"Bosques del futuro\",\"description\":\"Proyecto de reforestación\",\"goalAmount\":25000,\"durationDays\":45,\"category\":\"Medio ambiente\",\"mediaUrl\":\"https://cdn.example.com/forest.jpg\",\"rewards\":[{\"title\":\"Agradecimiento\",\"description\":\"Mención virtual\",\"minimumAmount\":10,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":10},{\"title\":\"Kit de apoyo\",\"description\":\"Recompensa física\",\"minimumAmount\":50,\"estimatedDeliveryDate\":\"2027-02-15\",\"quantity\":5}] }"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.rewards[0].title").value("Agradecimiento"))
+                .andExpect(jsonPath("$.rewards[0].estimatedDeliveryDate").value("2027-01-15"))
+                .andExpect(jsonPath("$.rewards[0].quantity").value(10))
+                .andExpect(jsonPath("$.rewards[0].remainingQuantity").value(10))
                 .andExpect(jsonPath("$.mediaType").value("IMAGE"))
                 .andReturn();
 
@@ -131,8 +139,9 @@ class CampaignControllerIntegrationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"Proyecto incompleto\",\"description\":\"Sin meta\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.field").value("goalAmount"))
-                .andExpect(jsonPath("$.code").value("REQUIRED"));
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.details[0].field").value("goalAmount"))
+                .andExpect(jsonPath("$.details[0].code").value("REQUIRED"));
 
         mockMvc.perform(get("/api/drafts")
                         .cookie(creator))
@@ -159,6 +168,12 @@ class CampaignControllerIntegrationTests {
 
         mockMvc.perform(delete("/api/drafts/{draftId}", draftId).cookie(creatorB))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/drafts/{draftId}", draftId)
+                        .cookie(creatorB)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"rewards\":[{\"title\":\"Ajeno\",\"description\":\"No autorizado\","
+                                + "\"minimumAmount\":10,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":1}]}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -168,7 +183,7 @@ class CampaignControllerIntegrationTests {
         String draft = mockMvc.perform(post("/api/drafts")
                         .cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"Energía verde\",\"description\":\"Campaña de paneles solares\",\"goalAmount\":30000,\"durationDays\":60,\"category\":\"Medio ambiente\",\"mediaUrl\":\"https://example.com/solar.jpg\",\"currency\":\"USD\",\"rewards\":[{\"title\":\"Gracias\",\"minimumAmount\":10},{\"title\":\"Kit\",\"minimumAmount\":50},{\"title\":\"Membresía\",\"minimumAmount\":150}]}"))
+                        .content("{\"title\":\"Energía verde\",\"description\":\"Campaña de paneles solares\",\"goalAmount\":30000,\"durationDays\":60,\"category\":\"Medio ambiente\",\"mediaUrl\":\"https://example.com/solar.jpg\",\"currency\":\"USD\",\"rewards\":[{\"title\":\"Gracias\",\"description\":\"Agradecimiento digital\",\"minimumAmount\":10,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":10},{\"title\":\"Kit\",\"description\":\"Kit de apoyo\",\"minimumAmount\":50,\"estimatedDeliveryDate\":\"2027-02-15\",\"quantity\":5},{\"title\":\"Membresía\",\"description\":\"Acceso a la comunidad\",\"minimumAmount\":150,\"estimatedDeliveryDate\":\"2027-03-15\",\"quantity\":2}]}"))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         String draftId = extractId(draft);
@@ -181,6 +196,11 @@ class CampaignControllerIntegrationTests {
                 .andExpect(jsonPath("$.currency").value("USD"))
                 .andExpect(jsonPath("$.currencyStatus").value("CONFIGURED"))
                 .andExpect(jsonPath("$.rewards.length()").value(3))
+                .andExpect(jsonPath("$.rewards[0].estimatedDeliveryDate").value("2027-01-15"))
+                .andExpect(jsonPath("$.rewards[0].quantity").value(10))
+                .andExpect(jsonPath("$.rewards[0].claimedQuantity").value(0))
+                .andExpect(jsonPath("$.rewards[0].available").value(true))
+                .andExpect(jsonPath("$.rewards[0].remainingQuantity").value(10))
                 .andExpect(jsonPath("$.progress.percentage").exists())
                 .andReturn();
 
@@ -293,20 +313,20 @@ class CampaignControllerIntegrationTests {
 
         mockMvc.perform(post("/api/drafts").cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"minimumAmount\":101}]}"))
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"description\":\"Kit de ejemplo\",\"minimumAmount\":101,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":1}]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"))
-                .andExpect(jsonPath("$.message").value("El monto mínimo de la recompensa no puede superar la meta de la campaña."));
-
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.details[0].code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"))
+                .andExpect(jsonPath("$.details[0].message").value("El monto mínimo de la recompensa no puede superar la meta de la campaña."));
         String draftId = extractId(mockMvc.perform(post("/api/drafts").cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"minimumAmount\":50}]}"))
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[{\"title\":\"Kit\",\"description\":\"Kit de ejemplo\",\"minimumAmount\":50,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":1}]}"))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
         mockMvc.perform(put("/api/drafts/{draftId}", draftId).cookie(creator)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"goalAmount\":40}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
+                .andExpect(jsonPath("$.details[0].code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
         mockMvc.perform(get("/api/drafts/{draftId}", draftId).cookie(creator))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.goalAmount").value(100.0));
@@ -314,13 +334,189 @@ class CampaignControllerIntegrationTests {
         User user = userRepository.findByEmail("creator.reward-rule@test.local").orElseThrow();
         CampaignDraft invalidDraft = new CampaignDraft(user.getId(), "Invalido", "Prueba", new BigDecimal("50.00"),
                 30, "Arte", null);
-        invalidDraft.setRewards(java.util.List.of(new DraftReward(invalidDraft, "Kit", "", new BigDecimal("51.00"), 0)));
+        invalidDraft.setRewards(java.util.List.of(new DraftReward(invalidDraft, "Kit", "Kit de ejemplo",
+                new BigDecimal("51.00"), 1, java.time.LocalDate.of(2027, 1, 15), 0)));
         invalidDraft = campaignDraftRepository.save(invalidDraft);
         mockMvc.perform(post("/api/drafts/{draftId}/publish", invalidDraft.getId()).cookie(creator))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
+                .andExpect(jsonPath("$.details[0].code").value("MINIMUM_AMOUNT_EXCEEDS_GOAL"));
         mockMvc.perform(get("/api/drafts/{draftId}", invalidDraft.getId()).cookie(creator))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void rewardValidationReportsEveryCorrectableFieldAndDoesNotSaveDraft() throws Exception {
+        Cookie creator = registerCreator("creator.reward-validation@test.local");
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":["
+                                + "{\"title\":\" \",\"description\":\" \",\"minimumAmount\":0,"
+                                + "\"estimatedDeliveryDate\":null,\"quantity\":0}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.details.length()").value(5))
+                .andExpect(jsonPath("$.details[0].field").value("rewards[0].title"))
+                .andExpect(jsonPath("$.details[1].field").value("rewards[0].description"))
+                .andExpect(jsonPath("$.details[2].field").value("rewards[0].minimumAmount"))
+                .andExpect(jsonPath("$.details[3].field").value("rewards[0].estimatedDeliveryDate"))
+                .andExpect(jsonPath("$.details[4].field").value("rewards[0].quantity"));
+
+        mockMvc.perform(get("/api/drafts").cookie(creator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    void nullQuantityIsUnlimitedAndAvailableInDraftResponse() throws Exception {
+        Cookie creator = registerCreator("creator.unlimited-reward@test.local");
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":["
+                                + "{\"title\":\"Acceso\",\"description\":\"Acceso digital ilimitado\","
+                                + "\"minimumAmount\":10,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":null}]}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.rewards[0].quantity").doesNotExist())
+                .andExpect(jsonPath("$.rewards[0].claimedQuantity").value(0))
+                .andExpect(jsonPath("$.rewards[0].available").value(true))
+                .andExpect(jsonPath("$.rewards[0].remainingQuantity").doesNotExist());
+    }
+
+    @Test
+    void malformedRewardDateAndFractionalQuantityAreReportedAgainstTheirFields() throws Exception {
+        Cookie creator = registerCreator("creator.reward-formats@test.local");
+        String campaignFields = "\"goalAmount\":100,\"durationDays\":30,\"category\":\"Arte\",\"rewards\":[";
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + campaignFields
+                                + "{\"title\":\"Acceso\",\"description\":\"Acceso digital\","
+                                + "\"minimumAmount\":10,\"estimatedDeliveryDate\":\"not-a-date\",\"quantity\":2}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.details[0].field").value("rewards[0].estimatedDeliveryDate"));
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + campaignFields
+                                + "{\"title\":\"Acceso\",\"description\":\"Acceso digital\","
+                                + "\"minimumAmount\":10,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":1.5}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.details[0].field").value("rewards[0].quantity"));
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + campaignFields
+                                + "{\"title\":\"Acceso\",\"description\":\"Acceso digital\","
+                                + "\"minimumAmount\":-1,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":1}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0].field").value("rewards[0].minimumAmount"));
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + campaignFields
+                                + "{\"title\":\"Acceso\",\"description\":\"Acceso digital\","
+                                + "\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":1}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0].field").value("rewards[0].minimumAmount"));
+
+        mockMvc.perform(post("/api/drafts").cookie(creator)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + campaignFields
+                                + "{\"title\":\"Acceso\",\"description\":\"Acceso digital\","
+                                + "\"minimumAmount\":10,\"estimatedDeliveryDate\":\"2027-01-15\",\"quantity\":-1}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0].field").value("rewards[0].quantity"));
+    }
+
+    @Test
+    void failedOrRepeatedPaymentDoesNotClaimTwiceAndSoldOutRewardCannotBeSelected() throws Exception {
+        User creator = saveCreator("creator.reward-capacity@test.local");
+        Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Cupo limitado", "Prueba",
+                new BigDecimal("100.00"), Instant.now().plusSeconds(86400), "Tecnología", null, "USD",
+                CampaignStatus.ACTIVE));
+        CampaignReward reward = new CampaignReward(campaign, "Kit", "Kit de apoyo", new BigDecimal("10.00"),
+                1, 0, LocalDate.of(2027, 1, 15));
+        campaign.setRewards(java.util.List.of(reward));
+        campaignRepository.saveAndFlush(campaign);
+        Cookie sponsor = registerSponsor("sponsor.reward-capacity@test.local");
+
+        MvcResult failed = postRewardContribution(sponsor, campaign.getId(), reward.getId(),
+                "reward-failed-payment", "sim_failure")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andReturn();
+        org.assertj.core.api.Assertions.assertThat(campaignRewardRepository.findById(reward.getId()).orElseThrow()
+                .getClaimedQuantity()).isZero();
+
+        String contributionId = extractId(failed.getResponse().getContentAsString());
+        mockMvc.perform(post("/api/contributions/{contributionId}/retry", contributionId)
+                        .cookie(sponsor).header("Idempotency-Key", "reward-retry-success")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"paymentMethodId\":\"sim_success\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("HELD"));
+        mockMvc.perform(post("/api/contributions/{contributionId}/retry", contributionId)
+                        .cookie(sponsor).header("Idempotency-Key", "reward-retry-again")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"paymentMethodId\":\"sim_success\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("HELD"));
+        postRewardContribution(sponsor, campaign.getId(), reward.getId(),
+                "reward-failed-payment", "sim_success")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("HELD"));
+
+        org.assertj.core.api.Assertions.assertThat(campaignRewardRepository.findById(reward.getId()).orElseThrow()
+                .getClaimedQuantity()).isEqualTo(1);
+        postRewardContribution(sponsor, campaign.getId(), reward.getId(),
+                "reward-sold-out", "sim_success")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REWARD_SOLD_OUT"));
+
+        mockMvc.perform(get("/api/campaigns/{campaignId}", campaign.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rewards[0].available").value(false))
+                .andExpect(jsonPath("$.rewards[0].claimedQuantity").value(1))
+                .andExpect(jsonPath("$.rewards[0].remainingQuantity").value(0));
+    }
+
+    @Test
+    void simultaneousClaimsCannotExceedRewardQuantity() throws Exception {
+        User creator = saveCreator("creator.reward-concurrent@test.local");
+        Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Último cupo", "Prueba",
+                new BigDecimal("100.00"), Instant.now().plusSeconds(86400), "Tecnología", null, "USD",
+                CampaignStatus.ACTIVE));
+        CampaignReward reward = new CampaignReward(campaign, "Kit", "Kit de apoyo", new BigDecimal("10.00"),
+                1, 0, LocalDate.of(2027, 1, 15));
+        campaign.setRewards(java.util.List.of(reward));
+        campaignRepository.saveAndFlush(campaign);
+        Cookie sponsorA = registerSponsor("sponsor.reward-concurrent.a@test.local");
+        Cookie sponsorB = registerSponsor("sponsor.reward-concurrent.b@test.local");
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Integer> first = executor.submit(() -> {
+                start.await();
+                return postRewardContribution(sponsorA, campaign.getId(), reward.getId(),
+                        "reward-concurrent-a", "sim_success").andReturn().getResponse().getStatus();
+            });
+            Future<Integer> second = executor.submit(() -> {
+                start.await();
+                return postRewardContribution(sponsorB, campaign.getId(), reward.getId(),
+                        "reward-concurrent-b", "sim_success").andReturn().getResponse().getStatus();
+            });
+            start.countDown();
+            org.assertj.core.api.Assertions.assertThat(java.util.List.of(
+                    first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(201, 409);
+        } finally {
+            executor.shutdownNow();
+        }
+        org.assertj.core.api.Assertions.assertThat(campaignRewardRepository.findById(reward.getId()).orElseThrow()
+                .getClaimedQuantity()).isEqualTo(1);
     }
 
         @Test
@@ -512,6 +708,15 @@ class CampaignControllerIntegrationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"amount\":" + amount + ",\"currency\":\"USD\",\"paymentMethodId\":\"" + paymentMethodId + "\"}"));
             }
+
+        private ResultActions postRewardContribution(Cookie sponsor, UUID campaignId, UUID rewardId,
+                                                     String key, String paymentMethodId) throws Exception {
+                return mockMvc.perform(post("/api/campaigns/{campaignId}/contributions", campaignId)
+                        .cookie(sponsor).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":10,\"currency\":\"USD\",\"rewardId\":\"" + rewardId
+                                + "\",\"paymentMethodId\":\"" + paymentMethodId + "\"}"));
+        }
 
             private User saveCreator(String email) {
                 return userRepository.save(new User("Creator", email, "hashed", UserRole.CREATOR, VerificationStatus.VERIFIED,

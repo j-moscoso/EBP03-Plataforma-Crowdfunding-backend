@@ -11,6 +11,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -32,6 +33,12 @@ public class DraftReward {
     @Column(name = "minimum_amount", nullable = false, precision = 19, scale = 2)
     private BigDecimal minimumAmount;
 
+    @Column
+    private Integer quantity;
+
+    @Column(name = "estimated_delivery_date")
+    private LocalDate estimatedDeliveryDate;
+
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder;
 
@@ -45,11 +52,18 @@ public class DraftReward {
     }
 
     public DraftReward(CampaignDraft draft, String title, String description, BigDecimal minimumAmount, Integer sortOrder) {
+        this(draft, title, description, minimumAmount, null, null, sortOrder);
+    }
+
+    public DraftReward(CampaignDraft draft, String title, String description, BigDecimal minimumAmount,
+                       Integer quantity, LocalDate estimatedDeliveryDate, Integer sortOrder) {
         this.id = UUID.randomUUID();
         this.draft = draft;
         this.title = title;
         this.description = description;
         this.minimumAmount = minimumAmount;
+        this.quantity = quantity;
+        this.estimatedDeliveryDate = estimatedDeliveryDate;
         this.sortOrder = sortOrder;
     }
 
@@ -70,6 +84,8 @@ public class DraftReward {
     public String getTitle() { return title; }
     public String getDescription() { return description; }
     public BigDecimal getMinimumAmount() { return minimumAmount; }
+    public Integer getQuantity() { return quantity; }
+    public LocalDate getEstimatedDeliveryDate() { return estimatedDeliveryDate; }
     public Integer getSortOrder() { return sortOrder; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
@@ -78,5 +94,7 @@ public class DraftReward {
     public void setTitle(String title) { this.title = title; }
     public void setDescription(String description) { this.description = description; }
     public void setMinimumAmount(BigDecimal minimumAmount) { this.minimumAmount = minimumAmount; }
+    public void setQuantity(Integer quantity) { this.quantity = quantity; }
+    public void setEstimatedDeliveryDate(LocalDate estimatedDeliveryDate) { this.estimatedDeliveryDate = estimatedDeliveryDate; }
     public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
 }

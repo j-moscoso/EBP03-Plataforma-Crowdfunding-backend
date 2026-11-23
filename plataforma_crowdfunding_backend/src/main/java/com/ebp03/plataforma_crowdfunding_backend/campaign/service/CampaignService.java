@@ -15,6 +15,7 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignUpdate;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.DraftReward;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.api.StrictIntegerDeserializer;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignDraftRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignUpdateRepository;
@@ -23,12 +24,14 @@ import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -106,7 +109,9 @@ public class CampaignService {
             List<DraftReward> rewards = new ArrayList<>();
             for (int index = 0; index < request.rewards().size(); index++) {
                 var rewardRequest = request.rewards().get(index);
-                rewards.add(new DraftReward(draft, rewardRequest.title(), rewardRequest.description(), rewardRequest.minimumAmount(), index));
+                rewards.add(new DraftReward(draft, normalizeText(rewardRequest.title()),
+                        normalizeText(rewardRequest.description()), rewardRequest.minimumAmount(),
+                        rewardRequest.quantity(), rewardRequest.estimatedDeliveryDate(), index));
             }
             draft.setRewards(rewards);
         }
@@ -183,7 +188,9 @@ public class CampaignService {
             List<DraftReward> rewards = new ArrayList<>();
             for (int index = 0; index < request.rewards().size(); index++) {
                 var rewardRequest = request.rewards().get(index);
-                DraftReward reward = new DraftReward(draft, rewardRequest.title(), rewardRequest.description(), rewardRequest.minimumAmount(), index);
+                DraftReward reward = new DraftReward(draft, normalizeText(rewardRequest.title()),
+                        normalizeText(rewardRequest.description()), rewardRequest.minimumAmount(),
+                        rewardRequest.quantity(), rewardRequest.estimatedDeliveryDate(), index);
                 rewards.add(reward);
             }
             draft.setRewards(rewards);
@@ -238,7 +245,8 @@ public class CampaignService {
         List<CampaignReward> rewards = new ArrayList<>();
         for (int index = 0; index < draft.getRewards().size(); index++) {
             var reward = draft.getRewards().get(index);
-            rewards.add(new CampaignReward(campaign, reward.getTitle(), reward.getDescription(), reward.getMinimumAmount(), null, 0));
+            rewards.add(new CampaignReward(campaign, reward.getTitle(), reward.getDescription(),
+                    reward.getMinimumAmount(), reward.getQuantity(), 0, reward.getEstimatedDeliveryDate()));
         }
         campaign.setRewards(rewards);
         campaignRepository.save(campaign);
@@ -410,8 +418,19 @@ public class CampaignService {
     private List<RewardResponse> rewardResponses(Campaign campaign) {
         return campaign.getRewards().stream()
                 .sorted((left, right) -> Integer.compare(left.getTitle().compareTo(right.getTitle()), 0))
-                .map(reward -> new RewardResponse(reward.getId(), reward.getTitle(), reward.getDescription(), reward.getMinimumAmount(), reward.getQuantity(), reward.getClaimedQuantity()))
+                .map(reward -> rewardResponse(reward.getId(), reward.getTitle(), reward.getDescription(),
+                        reward.getMinimumAmount(), reward.getEstimatedDeliveryDate(),
+                        reward.getQuantity(), reward.getClaimedQuantity()))
                 .toList();
+    }
+
+    static RewardResponse rewardResponse(UUID id, String title, String description, BigDecimal minimumAmount,
+                                         LocalDate estimatedDeliveryDate, Integer quantity, Integer claimedQuantity) {
+        int claimed = Objects.requireNonNullElse(claimedQuantity, 0);
+        boolean available = quantity == null || claimed < quantity;
+        Integer remainingQuantity = quantity == null ? null : Math.max(0, quantity - claimed);
+        return new RewardResponse(id, title, description, minimumAmount, estimatedDeliveryDate, quantity,
+                claimedQuantity, available, remainingQuantity);
     }
 
     private List<CampaignUpdateResponse> updateResponses(Campaign campaign) {
@@ -546,16 +565,32 @@ public class CampaignService {
                     errors.add(new FieldError("rewards[" + index + "]", "INVALID"));
                     continue;
                 }
-                if (reward.title() == null || reward.title().isBlank()) {
-                    errors.add(new FieldError("rewards[" + index + "].title", "REQUIRED"));
+                String prefix = "rewards[" + index + "].";
+                if (reward.title() == null || reward.title().trim().isEmpty()) {
+                    errors.add(new FieldError(prefix + "title", "REQUIRED"));
+                } else if (reward.title().trim().length() > 120) {
+                    errors.add(new FieldError(prefix + "title", "MAX_LENGTH"));
                 }
-                if (!validMoney(reward.minimumAmount())) {
-                    errors.add(new FieldError("rewards[" + index + "].minimumAmount", "INVALID"));
+                if (reward.description() == null || reward.description().trim().isEmpty()) {
+                    errors.add(new FieldError(prefix + "description", "REQUIRED"));
+                } else if (reward.description().trim().length() > 2000) {
+                    errors.add(new FieldError(prefix + "description", "MAX_LENGTH"));
+                }
+                if (reward.minimumAmount() == null) {
+                    errors.add(new FieldError(prefix + "minimumAmount", "REQUIRED"));
+                } else if (!validMoney(reward.minimumAmount())) {
+                    errors.add(new FieldError(prefix + "minimumAmount", "INVALID"));
                 } else if (goalAmount != null && reward.minimumAmount().compareTo(goalAmount) > 0) {
                     errors.add(new FieldError(
-                            "rewards[" + index + "].minimumAmount",
+                            prefix + "minimumAmount",
                             "MINIMUM_AMOUNT_EXCEEDS_GOAL",
                             "El monto mínimo de la recompensa no puede superar la meta de la campaña."));
+                }
+                if (reward.estimatedDeliveryDate() == null) {
+                    errors.add(new FieldError(prefix + "estimatedDeliveryDate", "REQUIRED"));
+                }
+                if (reward.quantity() != null && reward.quantity() <= 0) {
+                    errors.add(new FieldError(prefix + "quantity", "INVALID"));
                 }
             }
         }
@@ -570,7 +605,8 @@ public class CampaignService {
 
     private List<RewardRequest> convertRewards(List<DraftReward> rewards) {
         if (rewards == null) return List.of();
-        return rewards.stream().map(reward -> new RewardRequest(reward.getTitle(), reward.getDescription(), reward.getMinimumAmount())).toList();
+        return rewards.stream().map(reward -> new RewardRequest(reward.getTitle(), reward.getDescription(),
+                reward.getMinimumAmount(), reward.getEstimatedDeliveryDate(), reward.getQuantity())).toList();
     }
 
     private String normalizeText(String value) {
@@ -619,7 +655,9 @@ public class CampaignService {
         }
     }
 
-    public record RewardRequest(String title, String description, BigDecimal minimumAmount) { }
+    public record RewardRequest(String title, String description, BigDecimal minimumAmount,
+                                LocalDate estimatedDeliveryDate,
+                                @JsonDeserialize(using = StrictIntegerDeserializer.class) Integer quantity) { }
 
     public record FundingModelUpdateRequest(String fundingModel) { }
 
@@ -686,7 +724,8 @@ public class CampaignService {
                     draft.getFundingModel(),
                     draft.getRewards().stream()
                             .sorted((left, right) -> Integer.compare(left.getSortOrder(), right.getSortOrder()))
-                            .map(reward -> new RewardResponse(reward.getId(), reward.getTitle(), reward.getDescription(), reward.getMinimumAmount(), null, null))
+                            .map(reward -> rewardResponse(reward.getId(), reward.getTitle(), reward.getDescription(),
+                                    reward.getMinimumAmount(), reward.getEstimatedDeliveryDate(), reward.getQuantity(), 0))
                             .toList(),
                     draft.getCompletionPercentage(),
                     draft.getSavedAt(),
@@ -695,7 +734,9 @@ public class CampaignService {
         }
     }
 
-    public record RewardResponse(UUID id, String title, String description, BigDecimal minimumAmount, Integer quantity, Integer claimedQuantity) { }
+    public record RewardResponse(UUID id, String title, String description, BigDecimal minimumAmount,
+                                 LocalDate estimatedDeliveryDate, Integer quantity, Integer claimedQuantity,
+                                 boolean available, Integer remainingQuantity) { }
 
     public record CampaignProgress(BigDecimal raisedAmount,
                                   BigDecimal remainingAmount,

@@ -103,11 +103,12 @@ public class AuthExceptionHandler {
     }
 
     @ExceptionHandler(CampaignService.FieldValidationException.class)
-    ResponseEntity<Object> campaignFieldValidation(CampaignService.FieldValidationException exception) {
-        if (exception.getErrors().isEmpty()) {
-            return ResponseEntity.badRequest().body(new CampaignService.FieldError("", "INVALID"));
-        }
-        return ResponseEntity.badRequest().body(exception.getErrors().getFirst());
+    ResponseEntity<ApiError> campaignFieldValidation(CampaignService.FieldValidationException exception) {
+        List<ValidationErrorDetail> details = exception.getErrors().stream()
+                .map(error -> new ValidationErrorDetail(error.field(), error.code(), error.message()))
+                .toList();
+        return ResponseEntity.badRequest().body(
+                new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", details));
     }
 
     @ExceptionHandler(CampaignUpdateValidationException.class)
@@ -128,6 +129,7 @@ public class AuthExceptionHandler {
         UnknownCreatorProfileFieldException unknownCreatorField = findUnknownCreatorProfileField(exception);
         UnknownProfileFieldException unknownField = findUnknownProfileField(exception);
         InvalidProfileFieldTypeException invalidType = findInvalidProfileFieldType(exception);
+        ValidationErrorDetail invalidRewardField = findInvalidRewardField(exception);
         List<ValidationErrorDetail> details;
         if (unknownUpdateField != null) {
             details = List.of(new ValidationErrorDetail(
@@ -139,10 +141,37 @@ public class AuthExceptionHandler {
             details = List.of(new ValidationErrorDetail(unknownField.getField(), "UNKNOWN_FIELD", "El campo no está permitido."));
         } else if (invalidType != null) {
             details = List.of(new ValidationErrorDetail(invalidType.getField(), "INVALID_FORMAT", "El nombre debe ser texto."));
+        } else if (invalidRewardField != null) {
+            details = List.of(invalidRewardField);
         } else {
             details = List.of(new ValidationErrorDetail("body", "INVALID_BODY", "El cuerpo de la solicitud no es válido."));
         }
+
         return ResponseEntity.badRequest().body(new ApiError("VALIDATION_ERROR", "Revisa los campos indicados.", details));
+    }
+
+    private ValidationErrorDetail findInvalidRewardField(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (!(cause instanceof tools.jackson.core.JacksonException jacksonException)) continue;
+            boolean inRewards = false;
+            Integer rewardIndex = null;
+            String field = null;
+            for (tools.jackson.core.JacksonException.Reference reference : jacksonException.getPath()) {
+                if ("rewards".equals(reference.getPropertyName())) {
+                    inRewards = true;
+                } else if (inRewards && reference.getIndex() >= 0) {
+                    rewardIndex = reference.getIndex();
+                } else if (inRewards && ("estimatedDeliveryDate".equals(reference.getPropertyName())
+                        || "quantity".equals(reference.getPropertyName()))) {
+                    field = reference.getPropertyName();
+                }
+            }
+            if (rewardIndex != null && field != null) {
+                return new ValidationErrorDetail("rewards[" + rewardIndex + "]." + field,
+                        "INVALID_FORMAT", "El valor del campo no tiene un formato válido.");
+            }
+        }
+        return null;
     }
 
     private String profileField(MethodArgumentNotValidException exception, String field) {
