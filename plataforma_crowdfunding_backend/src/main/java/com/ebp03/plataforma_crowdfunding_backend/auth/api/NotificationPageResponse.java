@@ -7,5 +7,14 @@ public record NotificationPageResponse(
         int page,
         int pageSize,
         long totalElements,
-        int totalPages) {
+        int totalPages,
+        long unreadCount) {
+    public NotificationPageResponse(
+            List<NotificationResponse> content,
+            int page,
+            int pageSize,
+            long totalElements,
+            int totalPages) {
+        this(content, page, pageSize, totalElements, totalPages, 0);
+    }
 }

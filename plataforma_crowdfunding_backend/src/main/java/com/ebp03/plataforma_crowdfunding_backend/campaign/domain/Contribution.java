@@ -38,6 +38,9 @@ public class Contribution {
     @Column(name = "subscription_id")
     private UUID subscriptionId;
 
+    @Column(name = "is_anonymous", nullable = false)
+    private boolean anonymous;
+
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
@@ -72,6 +75,11 @@ public class Contribution {
 
     public Contribution(Campaign campaign, UUID sponsorId, CampaignReward reward, BigDecimal amount,
                         String currency, ContributionStatus status, String idempotencyKey) {
+        this(campaign, sponsorId, reward, amount, currency, status, idempotencyKey, false);
+    }
+
+    public Contribution(Campaign campaign, UUID sponsorId, CampaignReward reward, BigDecimal amount,
+                        String currency, ContributionStatus status, String idempotencyKey, boolean anonymous) {
         this.id = UUID.randomUUID();
         this.campaign = campaign;
         this.sponsorId = sponsorId;
@@ -80,6 +88,7 @@ public class Contribution {
         this.currency = currency;
         this.status = status;
         this.idempotencyKey = idempotencyKey;
+        this.anonymous = anonymous;
     }
 
     public Contribution(UUID sponsorId, UUID creatorId, UUID subscriptionId, BigDecimal amount,
@@ -111,6 +120,7 @@ public class Contribution {
     public UUID getSponsorId() { return sponsorId; }
     public UUID getCreatorId() { return creatorId; }
     public UUID getSubscriptionId() { return subscriptionId; }
+    public boolean isAnonymous() { return anonymous; }
     public CampaignReward getReward() { return reward; }
     public BigDecimal getAmount() { return amount; }
     public String getCurrency() { return currency; }

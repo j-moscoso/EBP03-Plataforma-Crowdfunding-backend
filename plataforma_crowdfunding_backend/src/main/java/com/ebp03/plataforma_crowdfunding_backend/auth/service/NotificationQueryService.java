@@ -41,7 +41,8 @@ public class NotificationQueryService {
                         item.getTitle(), item.getBody(), item.getReadAt(), item.getCreatedAt()))
                 .toList();
         return new NotificationPageResponse(
-                content, page, pageSize, notifications.getTotalElements(), notifications.getTotalPages());
+                content, page, pageSize, notifications.getTotalElements(), notifications.getTotalPages(),
+                notificationRepository.countByRecipientUserIdAndReadAtIsNull(authenticatedUser.getId()));
     }
 
     @Transactional

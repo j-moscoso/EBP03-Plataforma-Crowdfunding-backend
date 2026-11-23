@@ -52,6 +52,22 @@ contribución o comprobante exitoso; la suscripción sigue `ACTIVE` y se reinten
 un mes después. Los cobros exitosos generan una contribución `CONFIRMED`, un
 comprobante `SUCCESSFUL` y una notificación al creador.
 
+## Notificaciones de nuevos aportes
+
+Cuando un cobro de campaña se confirma, `ContributionService` persiste una
+notificación `NEW_CONTRIBUTION` para el creador en la misma transacción del
+pago y el comprobante. En campañas fijas el aporte y comprobante quedan
+`HELD`; en campañas flexibles quedan `CONFIRMED` y `SUCCESSFUL`. El nombre del
+patrocinador se escapa como texto, o se presenta como `Anónimo` si así lo
+solicitó o no tiene nombre disponible. El cuerpo usa el monto validado con dos
+decimales y la moneda de la contribución.
+
+La unicidad existente por `contribution_id` y tipo, junto con la verificación
+del destinatario, evita duplicados por reintentos o webhooks. `GET
+/api/notifications/me` calcula `unreadCount` en la base de datos para el usuario
+autenticado; `unreadOnly=true` filtra la página sin cambiar ese conteo global.
+Marcar como leída es idempotente y queda limitado al propietario.
+
 Las fechas mensuales se calculan en UTC con `ZonedDateTime.plusMonths(1)`. Por
 ejemplo, una fecha de cobro el 31 se ajusta al último día válido del mes
 siguiente. Las pruebas backend se ejecutan desde `plataforma_crowdfunding_backend`

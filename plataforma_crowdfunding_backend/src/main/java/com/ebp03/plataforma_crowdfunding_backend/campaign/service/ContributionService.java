@@ -34,6 +34,7 @@ public class ContributionService {
     private final PaymentProvider paymentProvider;
     private final PaymentWebhookAdapter webhookAdapter;
     private final TransactionReceiptRepository receipts;
+    private final NotificationPublisher notificationPublisher;
     private final BigDecimal feeRate;
     private final String webhookSecret;
 
@@ -42,11 +43,13 @@ public class ContributionService {
                                PaymentRepository payments, PaymentEventRepository events,
                                PaymentProvider paymentProvider, PaymentWebhookAdapter webhookAdapter,
                                TransactionReceiptRepository receipts,
+                               NotificationPublisher notificationPublisher,
                                @Value("${app.payment.platform-fee-rate:0.05}") BigDecimal feeRate,
                                @Value("${app.payment.webhook-secret:development-webhook-secret}") String webhookSecret) {
         this.campaigns = campaigns; this.rewards = rewards; this.contributions = contributions; this.payments = payments;
         this.events = events; this.paymentProvider = paymentProvider; this.webhookAdapter = webhookAdapter;
-        this.receipts = receipts; this.feeRate = feeRate; this.webhookSecret = webhookSecret;
+        this.receipts = receipts; this.notificationPublisher = notificationPublisher;
+        this.feeRate = feeRate; this.webhookSecret = webhookSecret;
     }
 
     @Transactional(noRollbackFor = ContributionCapacityException.class)
@@ -71,7 +74,8 @@ public class ContributionService {
         if (request.paymentMethodId() == null || request.paymentMethodId().isBlank()) bad("paymentMethodId es obligatorio");
 
         Contribution contribution = contributions.save(new Contribution(campaign, sponsor.getId(), reward,
-                request.amount().setScale(2), currency, ContributionStatus.PENDING, idempotencyKey));
+                request.amount().setScale(2), currency, ContributionStatus.PENDING, idempotencyKey,
+                Boolean.TRUE.equals(request.anonymous())));
         Payment payment = payments.save(new Payment(contribution, "simulated", contribution.getAmount(),
                 contribution.getAmount().multiply(feeRate).setScale(2, RoundingMode.HALF_UP)));
         applyProviderResult(contribution, payment, paymentProvider.charge(request.paymentMethodId(), contribution.getAmount(), contribution.getCurrency()));
@@ -177,7 +181,9 @@ public class ContributionService {
     }
 
     private void applyProviderResult(Contribution contribution, Payment payment, PaymentProvider.Result result) {
+        boolean publishContribution = false;
         if (result.successful()) {
+            boolean wasAlreadyConfirmed = isConfirmed(contribution);
             try {
                 confirm(contribution);
                 payment.setStatus(PaymentStatus.SUCCEEDED); payment.setProviderPaymentId(result.providerPaymentId());
@@ -185,6 +191,7 @@ public class ContributionService {
                         contribution.getCampaign().getFundingModel() == FundingModel.FIXED
                                 ? TransactionReceiptStatus.HELD
                                 : TransactionReceiptStatus.SUCCESSFUL);
+                publishContribution = !wasAlreadyConfirmed;
             } catch (ContributionCapacityException | RewardCapacityException exception) {
                 failForCapacity(contribution, payment, exception);
                 payments.save(payment);
@@ -195,17 +202,21 @@ public class ContributionService {
             markFailed(contribution, payment, result.failureCode());
         }
         payments.save(payment); contributions.save(contribution);
+        if (publishContribution) {
+            notificationPublisher.publishNewContribution(contribution.getCampaign(), contribution);
+        }
     }
 
     private void applyWebhookStatus(Payment payment, PaymentStatus targetStatus) {
         Contribution contribution = payment.getContribution();
+        boolean publishContribution = false;
         switch (targetStatus) {
             case PROCESSING -> {
                 if (payment.getStatus() == PaymentStatus.CREATED) payment.setStatus(PaymentStatus.PROCESSING);
             }
             case SUCCEEDED -> {
                 if (payment.getStatus() != PaymentStatus.REFUNDED) {
-                    markSuccessful(contribution, payment, payment.getProviderPaymentId());
+                    publishContribution = markSuccessful(contribution, payment, payment.getProviderPaymentId());
                 }
             }
             case FAILED -> markFailed(contribution, payment, "PROVIDER_FAILURE");
@@ -214,12 +225,15 @@ public class ContributionService {
         }
         payments.save(payment);
         contributions.save(contribution);
+        if (publishContribution) {
+            notificationPublisher.publishNewContribution(contribution.getCampaign(), contribution);
+        }
     }
 
-    private void markSuccessful(Contribution contribution, Payment payment, String providerPaymentId) {
+    private boolean markSuccessful(Contribution contribution, Payment payment, String providerPaymentId) {
         if (payment.getStatus() == PaymentStatus.REFUNDED
                 || contribution.getStatus() == ContributionStatus.REFUNDED) {
-            return;
+            return false;
         }
         payment.setStatus(PaymentStatus.SUCCEEDED);
         if (providerPaymentId != null) payment.setProviderPaymentId(providerPaymentId);
@@ -231,12 +245,19 @@ public class ContributionService {
                     contribution.getCampaign().getFundingModel() == FundingModel.FIXED
                             ? TransactionReceiptStatus.HELD
                             : TransactionReceiptStatus.SUCCESSFUL);
+            return true;
         } else if (isLatestPayment(payment)) {
             createOrUpdateReceipt(contribution,
                     contribution.getCampaign().getFundingModel() == FundingModel.FIXED
                             ? TransactionReceiptStatus.HELD
                             : TransactionReceiptStatus.SUCCESSFUL);
         }
+        return false;
+    }
+
+    private boolean isConfirmed(Contribution contribution) {
+        return contribution.getStatus() == ContributionStatus.CONFIRMED
+                || contribution.getStatus() == ContributionStatus.HELD;
     }
 
     private void markFailed(Contribution contribution, Payment payment, String failureCode) {
@@ -446,7 +467,8 @@ public class ContributionService {
     private void bad(String message) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private String sha256(String value) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception exception) { throw new IllegalStateException(exception); } }
 
-    public record CreateRequest(BigDecimal amount, String currency, UUID rewardId, String paymentMethodId) { }
+    public record CreateRequest(BigDecimal amount, String currency, UUID rewardId, String paymentMethodId,
+                                Boolean anonymous) { }
     public record RetryRequest(String paymentMethodId) { }
     public record PaymentResponse(UUID id, PaymentStatus status, Instant refundedAt) { }
     public record ReceiptResponse(
