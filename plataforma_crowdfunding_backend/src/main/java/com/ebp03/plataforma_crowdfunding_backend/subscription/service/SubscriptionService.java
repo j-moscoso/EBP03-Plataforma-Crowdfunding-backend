@@ -9,11 +9,16 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.repository.NotificationRep
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Contribution;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.ContributionStatus;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Payment;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.PaymentStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.TransactionReceipt;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.TransactionReceiptStatus;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.SubscriptionCampaignAllocation;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SubscriptionCampaignAllocationRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.PaymentRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.TransactionReceiptRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.service.PaymentProvider;
@@ -26,6 +31,7 @@ import com.ebp03.plataforma_crowdfunding_backend.subscription.domain.Subscriptio
 import com.ebp03.plataforma_crowdfunding_backend.subscription.repository.CreatorSubscriptionRepository;
 import com.ebp03.plataforma_crowdfunding_backend.subscription.repository.SubscriptionChargeAttemptRepository;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -50,6 +56,8 @@ public class SubscriptionService {
     private final UserRepository users;
     private final CreatorSubscriptionRepository subscriptions;
     private final SubscriptionChargeAttemptRepository attempts;
+    private final CampaignRepository campaigns;
+    private final SubscriptionCampaignAllocationRepository allocations;
     private final ContributionRepository contributions;
     private final PaymentRepository payments;
     private final TransactionReceiptRepository receipts;
@@ -61,6 +69,8 @@ public class SubscriptionService {
             UserRepository users,
             CreatorSubscriptionRepository subscriptions,
             SubscriptionChargeAttemptRepository attempts,
+            CampaignRepository campaigns,
+            SubscriptionCampaignAllocationRepository allocations,
             ContributionRepository contributions,
             PaymentRepository payments,
             TransactionReceiptRepository receipts,
@@ -70,6 +80,8 @@ public class SubscriptionService {
         this.users = users;
         this.subscriptions = subscriptions;
         this.attempts = attempts;
+        this.campaigns = campaigns;
+        this.allocations = allocations;
         this.contributions = contributions;
         this.payments = payments;
         this.receipts = receipts;
@@ -97,6 +109,8 @@ public class SubscriptionService {
         }
 
         Instant scheduledAt = Instant.now();
+        List<Campaign> activeCampaigns = activeCampaigns(creator.getId(), currency, scheduledAt);
+        requireAllocatableCampaigns(activeCampaigns);
         CreatorSubscription subscription = new CreatorSubscription(
                 sponsor.getId(), creator.getId(), request.paymentMethodId(), request.amount().setScale(2),
                 currency, nextMonth(scheduledAt));
@@ -129,6 +143,7 @@ public class SubscriptionService {
         attempts.save(attempt);
         receipts.save(new TransactionReceipt(
                 contribution, "REF-" + UUID.randomUUID(), TransactionReceiptStatus.SUCCESSFUL));
+        allocateCharge(attempt, subscription, activeCampaigns);
 
         return SubscriptionResponse.from(subscription);
     }
@@ -184,12 +199,21 @@ public class SubscriptionService {
                 continue;
             }
 
+            List<Campaign> activeCampaigns = activeCampaigns(
+                    subscription.getCreatorId(), subscription.getCurrency(), now);
+            if (activeCampaigns.isEmpty()) {
+                subscription.scheduleNextCharge(nextMonth(now));
+                processed++;
+                continue;
+            }
+
             SubscriptionChargeAttempt attempt = attempts.save(new SubscriptionChargeAttempt(
                     subscription, scheduledAt, idempotencyKey));
             PaymentProvider.Result result = paymentProvider.charge(
                     subscription.getPaymentMethodRef(), subscription.getAmount(), subscription.getCurrency());
             if (result.successful()) {
-                completeSuccessfulRenewal(subscription, attempt, result, idempotencyKey, now);
+                completeSuccessfulRenewal(
+                        subscription, attempt, result, idempotencyKey, now, activeCampaigns);
             } else {
                 recordFailedRenewal(subscription, attempt, result.failureCode(), now);
             }
@@ -203,7 +227,8 @@ public class SubscriptionService {
             SubscriptionChargeAttempt attempt,
             PaymentProvider.Result result,
             String idempotencyKey,
-            Instant chargedAt) {
+            Instant chargedAt,
+            List<Campaign> activeCampaigns) {
         Contribution contribution = contributions.save(new Contribution(
                 subscription.getSponsorId(), subscription.getCreatorId(), subscription.getId(),
                 subscription.getAmount(), subscription.getCurrency(), ContributionStatus.CONFIRMED,
@@ -220,8 +245,46 @@ public class SubscriptionService {
         attempts.save(attempt);
         receipts.save(new TransactionReceipt(
                 contribution, "REF-" + UUID.randomUUID(), TransactionReceiptStatus.SUCCESSFUL));
+        allocateCharge(attempt, subscription, activeCampaigns);
         createRenewalNotification(subscription, contribution);
         subscription.completeCharge(chargedAt, nextMonth(chargedAt));
+    }
+
+    private List<Campaign> activeCampaigns(UUID creatorId, String currency, Instant now) {
+        return campaigns.findActiveByCreatorAndCurrencyForUpdate(
+                creatorId, CampaignStatus.ACTIVE, currency, now);
+    }
+
+    private void requireAllocatableCampaigns(List<Campaign> activeCampaigns) {
+        if (activeCampaigns.isEmpty()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "NO_ACTIVE_CAMPAIGNS_FOR_SUBSCRIPTION");
+        }
+    }
+
+    private void allocateCharge(
+            SubscriptionChargeAttempt attempt,
+            CreatorSubscription subscription,
+            List<Campaign> activeCampaigns) {
+        BigInteger[] division = subscription.getAmount()
+                .movePointRight(2)
+                .toBigIntegerExact()
+                .divideAndRemainder(BigInteger.valueOf(activeCampaigns.size()));
+        List<SubscriptionCampaignAllocation> entries = new ArrayList<>();
+        for (int index = 0; index < activeCampaigns.size(); index++) {
+            BigInteger cents = division[0];
+            if (BigInteger.valueOf(index).compareTo(division[1]) < 0) {
+                cents = cents.add(BigInteger.ONE);
+            }
+            if (cents.signum() == 0) continue;
+            entries.add(new SubscriptionCampaignAllocation(
+                    attempt.getId(),
+                    activeCampaigns.get(index).getId(),
+                    subscription.getSponsorId(),
+                    new BigDecimal(cents, 2),
+                    subscription.getCurrency()));
+        }
+        allocations.saveAll(entries);
     }
 
     private void recordFailedRenewal(

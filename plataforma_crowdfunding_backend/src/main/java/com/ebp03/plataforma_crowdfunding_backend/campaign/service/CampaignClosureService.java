@@ -13,6 +13,7 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.TransactionRece
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.PaymentRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SubscriptionCampaignAllocationRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.TransactionReceiptRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,17 +27,20 @@ import org.springframework.transaction.annotation.Transactional;
 public class CampaignClosureService {
     private final CampaignRepository campaigns;
     private final ContributionRepository contributions;
+    private final SubscriptionCampaignAllocationRepository subscriptionAllocations;
     private final PaymentRepository payments;
     private final TransactionReceiptRepository receipts;
     private final NotificationRepository notifications;
 
     public CampaignClosureService(CampaignRepository campaigns,
                                   ContributionRepository contributions,
+                                  SubscriptionCampaignAllocationRepository subscriptionAllocations,
                                   PaymentRepository payments,
                                   TransactionReceiptRepository receipts,
                                   NotificationRepository notifications) {
         this.campaigns = campaigns;
         this.contributions = contributions;
+        this.subscriptionAllocations = subscriptionAllocations;
         this.payments = payments;
         this.receipts = receipts;
         this.notifications = notifications;
@@ -77,6 +81,8 @@ public class CampaignClosureService {
         BigDecimal raised = contributions.sumAmountByCampaignIdStatusesAndCurrency(
                 campaign.getId(), eligibleStatuses, campaign.getCurrency());
         if (raised == null) raised = BigDecimal.ZERO;
+        raised = raised.add(subscriptionAllocations.sumAmountByCampaignIdAndCurrency(
+                campaign.getId(), campaign.getCurrency()));
 
         if (campaign.getFundingModel() == FundingModel.FIXED) {
             if (raised.compareTo(campaign.getGoalAmount()) >= 0) {

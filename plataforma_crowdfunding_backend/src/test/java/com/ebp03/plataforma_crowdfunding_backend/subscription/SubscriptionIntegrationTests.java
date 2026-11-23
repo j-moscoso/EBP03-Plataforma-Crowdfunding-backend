@@ -13,6 +13,11 @@ import com.ebp03.plataforma_crowdfunding_backend.auth.domain.User;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.UserRole;
 import com.ebp03.plataforma_crowdfunding_backend.auth.domain.VerificationStatus;
 import com.ebp03.plataforma_crowdfunding_backend.auth.repository.UserRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.Campaign;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignMediaType;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.CampaignStatus;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.FundingModel;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.subscription.api.CreateSubscriptionRequest;
 import com.ebp03.plataforma_crowdfunding_backend.subscription.domain.CreatorSubscription;
 import com.ebp03.plataforma_crowdfunding_backend.subscription.domain.CreatorSubscriptionStatus;
@@ -21,7 +26,9 @@ import com.ebp03.plataforma_crowdfunding_backend.subscription.service.Subscripti
 import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -44,6 +51,7 @@ import org.springframework.web.server.ResponseStatusException;
 class SubscriptionIntegrationTests {
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
+    @Autowired private CampaignRepository campaignRepository;
     @Autowired private CreatorSubscriptionRepository subscriptionRepository;
     @Autowired private SubscriptionService subscriptionService;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -53,6 +61,9 @@ class SubscriptionIntegrationTests {
         Cookie sponsorSession = register("subscription-first-sponsor@test.local", "sponsor");
         Cookie creatorSession = register("subscription-first-creator@test.local", "creator");
         User creator = findUser("subscription-first-creator@test.local");
+        Campaign firstCampaign = createCampaign(creator, "first", "USD");
+        Campaign secondCampaign = createCampaign(creator, "second", "USD");
+        createCampaign(creator, "third", "USD");
 
         MvcResult result = create(sponsorSession, creator.getId(), "25.00", "usd", "sim_success")
                 .andExpect(status().isCreated())
@@ -82,6 +93,35 @@ class SubscriptionIntegrationTests {
                 select count(*) from subscription_charge_attempts
                 where subscription_id = ? and status = 'SUCCEEDED'
                 """, subscriptionId));
+        assertEquals(3, count("""
+                select count(*) from subscription_campaign_allocations a
+                join subscription_charge_attempts attempt
+                  on attempt.id = a.subscription_charge_attempt_id
+                where attempt.subscription_id = ?
+                """, subscriptionId));
+        assertEquals(List.of(new BigDecimal("8.33"), new BigDecimal("8.33"), new BigDecimal("8.34")),
+                jdbcTemplate.queryForList("""
+                        select amount from subscription_campaign_allocations a
+                        join subscription_charge_attempts attempt
+                          on attempt.id = a.subscription_charge_attempt_id
+                        where attempt.subscription_id = ?
+                        order by a.amount
+                        """, BigDecimal.class, subscriptionId));
+
+        mockMvc.perform(get("/api/campaigns/{campaignId}", firstCampaign.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.progress.raisedAmount").value(
+                        jdbcTemplate.queryForObject(
+                                "select amount from subscription_campaign_allocations where campaign_id = ?",
+                                BigDecimal.class, firstCampaign.getId()).doubleValue()))
+                .andExpect(jsonPath("$.progress.sponsorsCount").value(1));
+        mockMvc.perform(get("/api/sponsors/me/supported-campaigns").cookie(sponsorSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(3))
+                .andExpect(jsonPath("$.content[0].amountContributedByMe").exists())
+                .andExpect(jsonPath("$.content[1].amountContributedByMe").exists())
+                .andExpect(jsonPath("$.content[2].amountContributedByMe").exists());
+        assertNotNull(secondCampaign.getId());
 
         mockMvc.perform(get("/api/contributions/me").cookie(sponsorSession))
                 .andExpect(status().isOk())
@@ -98,10 +138,26 @@ class SubscriptionIntegrationTests {
     }
 
     @Test
+    void subscriptionCannotChargeWithoutAnActiveCampaignInItsCurrency() throws Exception {
+        Cookie sponsorSession = register("subscription-no-campaign-sponsor@test.local", "sponsor");
+        register("subscription-no-campaign-creator@test.local", "creator");
+        User creator = findUser("subscription-no-campaign-creator@test.local");
+
+        create(sponsorSession, creator.getId(), "10.00", "USD", "sim_success")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("NO_ACTIVE_CAMPAIGNS_FOR_SUBSCRIPTION"));
+
+        assertEquals(0, count("select count(*) from creator_subscriptions where creator_id = ?", creator.getId()));
+        assertEquals(0, count("select count(*) from contributions where sponsor_id = ?",
+                findUser("subscription-no-campaign-sponsor@test.local").getId()));
+    }
+
+    @Test
     void invalidFirstPaymentAndInputsDoNotActivateSubscription() throws Exception {
         Cookie sponsorSession = register("subscription-invalid-sponsor@test.local", "sponsor");
         Cookie creatorSession = register("subscription-invalid-creator@test.local", "creator");
         User creator = findUser("subscription-invalid-creator@test.local");
+        createCampaign(creator, "valid-payment-target", "USD");
 
         create(sponsorSession, creator.getId(), "10.00", "USD", "sim_failure")
                 .andExpect(status().isPaymentRequired())
@@ -253,11 +309,40 @@ class SubscriptionIntegrationTests {
     }
 
     @Test
+    void renewalIsSkippedWhenThereAreNoActiveCampaignsToReceiveIt() throws Exception {
+        Cookie sponsorSession = register("subscription-no-active-renew-sponsor@test.local", "sponsor");
+        register("subscription-no-active-renew-creator@test.local", "creator");
+        User creator = findUser("subscription-no-active-renew-creator@test.local");
+        Campaign campaign = createCampaign(creator, "initial-target", "USD");
+        MvcResult result = create(sponsorSession, creator.getId(), "25.00", "USD", "sim_success")
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID subscriptionId = UUID.fromString(jsonValue(result, "id"));
+
+        jdbcTemplate.update("update campaigns set status = 'FAILED' where id = ?", campaign.getId());
+        Instant processingTime = Instant.now();
+        jdbcTemplate.update(
+                "update creator_subscriptions set next_charge_at = ? where id = ?",
+                processingTime.minusSeconds(1), subscriptionId);
+
+        assertEquals(1, subscriptionService.processDueSubscriptions(processingTime));
+        CreatorSubscription subscription = subscriptionRepository.findById(subscriptionId).orElseThrow();
+        assertEquals(processingTime.atZone(ZoneOffset.UTC).plusMonths(1).toInstant()
+                        .truncatedTo(ChronoUnit.MILLIS),
+                subscription.getNextChargeAt().truncatedTo(ChronoUnit.MILLIS));
+        assertEquals(1, count("select count(*) from contributions where subscription_id = ?", subscriptionId));
+        assertEquals(1, count("select count(*) from subscription_charge_attempts where subscription_id = ?", subscriptionId));
+        assertEquals(1, count("select count(*) from payments where subscription_charge_attempt_id in "
+                + "(select id from subscription_charge_attempts where subscription_id = ?)", subscriptionId));
+    }
+
+    @Test
     void concurrentCreationForTheSameCreatorProducesOnlyOneActiveSubscription() throws Exception {
         register("subscription-race-sponsor@test.local", "sponsor");
         register("subscription-race-creator@test.local", "creator");
         User sponsor = findUser("subscription-race-sponsor@test.local");
         User creator = findUser("subscription-race-creator@test.local");
+        createCampaign(creator, "race-target", "USD");
         CreateSubscriptionRequest request = new CreateSubscriptionRequest(
                 creator.getId(), new BigDecimal("8.00"), "USD", "sim_success");
         CountDownLatch ready = new CountDownLatch(2);
@@ -306,10 +391,26 @@ class SubscriptionIntegrationTests {
     }
 
     private UUID createAndGetId(Cookie session, UUID creatorId) throws Exception {
+        createCampaign(userRepository.findById(creatorId).orElseThrow(), "subscription-target", "USD");
         MvcResult result = create(session, creatorId, "25.00", "USD", "sim_success")
                 .andExpect(status().isCreated())
                 .andReturn();
         return UUID.fromString(jsonValue(result, "id"));
+    }
+
+    private Campaign createCampaign(User creator, String title, String currency) {
+        return campaignRepository.saveAndFlush(new Campaign(
+                creator.getId(),
+                "Subscription campaign " + title,
+                "Campaign used to receive creator subscription allocations.",
+                new BigDecimal("1000.00"),
+                Instant.now().plusSeconds(86_400L * 120),
+                "Tecnología",
+                null,
+                currency,
+                CampaignMediaType.IMAGE,
+                FundingModel.FIXED,
+                CampaignStatus.ACTIVE));
     }
 
     private Cookie register(String email, String role) throws Exception {

@@ -20,6 +20,7 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignDra
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignUpdateRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SubscriptionCampaignAllocationRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -58,6 +59,7 @@ public class CampaignService {
     private final CampaignRepository campaignRepository;
     private final CampaignUpdateRepository campaignUpdateRepository;
     private final ContributionRepository contributionRepository;
+    private final SubscriptionCampaignAllocationRepository subscriptionAllocations;
     private final UserRepository userRepository;
     private final CampaignClosureService campaignClosureService;
 
@@ -65,12 +67,14 @@ public class CampaignService {
                           CampaignRepository campaignRepository,
                           CampaignUpdateRepository campaignUpdateRepository,
                           ContributionRepository contributionRepository,
+                          SubscriptionCampaignAllocationRepository subscriptionAllocations,
                           UserRepository userRepository,
                           CampaignClosureService campaignClosureService) {
         this.campaignDraftRepository = campaignDraftRepository;
         this.campaignRepository = campaignRepository;
         this.campaignUpdateRepository = campaignUpdateRepository;
         this.contributionRepository = contributionRepository;
+        this.subscriptionAllocations = subscriptionAllocations;
         this.userRepository = userRepository;
         this.campaignClosureService = campaignClosureService;
     }
@@ -449,6 +453,10 @@ public class CampaignService {
                     campaign.getId(), ContributionStatus.CONFIRMED);
         }
         if (raised == null) raised = BigDecimal.ZERO;
+        if (campaign.getCurrency() != null) {
+            raised = raised.add(subscriptionAllocations.sumAmountByCampaignIdAndCurrency(
+                    campaign.getId(), campaign.getCurrency()));
+        }
 
         BigDecimal goal = campaign.getGoalAmount();
         BigDecimal remaining = goal.subtract(raised);
@@ -462,18 +470,14 @@ public class CampaignService {
             if (percentage > 100) percentage = 100;
         }
 
-        long sponsorsCount;
-        if (campaign.getFundingModel() == FundingModel.FIXED) {
-            sponsorsCount = Objects.requireNonNullElse(
-                    contributionRepository.countDistinctSponsorByCampaignIdAndStatuses(
-                            campaign.getId(), List.of(ContributionStatus.CONFIRMED, ContributionStatus.HELD)),
-                    0L);
-        } else {
-            sponsorsCount = Objects.requireNonNullElse(
-                    contributionRepository.countDistinctSponsorByCampaignIdAndStatus(
-                            campaign.getId(), ContributionStatus.CONFIRMED),
-                    0L);
-        }
+        List<ContributionStatus> countedStatuses = campaign.getFundingModel() == FundingModel.FIXED
+                ? List.of(ContributionStatus.CONFIRMED, ContributionStatus.HELD)
+                : List.of(ContributionStatus.CONFIRMED);
+        Set<UUID> sponsors = new LinkedHashSet<>(
+                contributionRepository.findDistinctSponsorIdsByCampaignIdAndStatuses(
+                        campaign.getId(), countedStatuses));
+        sponsors.addAll(subscriptionAllocations.findDistinctSponsorIdsByCampaignId(campaign.getId()));
+        long sponsorsCount = sponsors.size();
         if (sponsorsCount < 0) sponsorsCount = 0;
 
         long secondsRemaining = Math.max(0L, campaign.getDeadline().getEpochSecond() - Instant.now().getEpochSecond());

@@ -30,25 +30,33 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
     BigDecimal sumAmountByCampaignIdAndStatus(@Param("campaignId") UUID campaignId, @Param("status") ContributionStatus status);
 
     @Query(value = """
-            WITH single_currency AS (
-                SELECT campaign_id, MIN(UPPER(currency)) AS currency
+            WITH campaign_contributions AS (
+                SELECT campaign_id, sponsor_id, amount, UPPER(currency) AS currency,
+                       COALESCE(confirmed_at, created_at) AS contributed_at
                 FROM contributions
-                WHERE status = 'CONFIRMED'
+                WHERE campaign_id IS NOT NULL AND status = 'CONFIRMED'
+                UNION ALL
+                SELECT campaign_id, sponsor_id, amount, UPPER(currency) AS currency,
+                       created_at AS contributed_at
+                FROM subscription_campaign_allocations
+            ),
+            single_currency AS (
+                SELECT campaign_id, MIN(currency) AS currency
+                FROM campaign_contributions
                 GROUP BY campaign_id
-                HAVING COUNT(DISTINCT UPPER(currency)) = 1
+                HAVING COUNT(DISTINCT currency) = 1
             ),
             personal_totals AS (
-                SELECT campaign_id, UPPER(currency) AS currency, SUM(amount) AS amount_contributed,
-                       MAX(COALESCE(confirmed_at, created_at)) AS last_contribution_at
-                FROM contributions
-                WHERE sponsor_id = :sponsorId AND status = 'CONFIRMED'
-                GROUP BY campaign_id, UPPER(currency)
+                SELECT campaign_id, currency, SUM(amount) AS amount_contributed,
+                       MAX(contributed_at) AS last_contribution_at
+                FROM campaign_contributions
+                WHERE sponsor_id = :sponsorId
+                GROUP BY campaign_id, currency
             ),
             campaign_totals AS (
-                SELECT campaign_id, UPPER(currency) AS currency, SUM(amount) AS raised_amount
-                FROM contributions
-                WHERE status = 'CONFIRMED'
-                GROUP BY campaign_id, UPPER(currency)
+                SELECT campaign_id, currency, SUM(amount) AS raised_amount
+                FROM campaign_contributions
+                GROUP BY campaign_id, currency
             )
             SELECT CAST(campaign.id AS VARCHAR(36)) AS "campaignId",
                    campaign.media_url AS "imageUrl",
@@ -67,18 +75,25 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
             ORDER BY personal.last_contribution_at DESC, campaign.id DESC
             """,
             countQuery = """
-                    WITH single_currency AS (
-                        SELECT campaign_id, MIN(UPPER(currency)) AS currency
+                    WITH campaign_contributions AS (
+                        SELECT campaign_id, sponsor_id, amount, UPPER(currency) AS currency
                         FROM contributions
-                        WHERE status = 'CONFIRMED'
+                        WHERE campaign_id IS NOT NULL AND status = 'CONFIRMED'
+                        UNION ALL
+                        SELECT campaign_id, sponsor_id, amount, UPPER(currency) AS currency
+                        FROM subscription_campaign_allocations
+                    ),
+                    single_currency AS (
+                        SELECT campaign_id, MIN(currency) AS currency
+                        FROM campaign_contributions
                         GROUP BY campaign_id
-                        HAVING COUNT(DISTINCT UPPER(currency)) = 1
+                        HAVING COUNT(DISTINCT currency) = 1
                     ),
                     personal_totals AS (
-                        SELECT campaign_id, UPPER(currency) AS currency
-                        FROM contributions
-                        WHERE sponsor_id = :sponsorId AND status = 'CONFIRMED'
-                        GROUP BY campaign_id, UPPER(currency)
+                        SELECT campaign_id, currency
+                        FROM campaign_contributions
+                        WHERE sponsor_id = :sponsorId
+                        GROUP BY campaign_id, currency
                     )
                     SELECT COUNT(DISTINCT personal.campaign_id)
                     FROM personal_totals personal
@@ -94,13 +109,26 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
             SELECT COUNT(*)
             FROM (
                 SELECT all_contributions.campaign_id
-                FROM contributions all_contributions
-                WHERE all_contributions.status = 'CONFIRMED'
+                FROM (
+                    SELECT campaign_id, sponsor_id, currency
+                    FROM contributions
+                    WHERE campaign_id IS NOT NULL AND status = 'CONFIRMED'
+                    UNION ALL
+                    SELECT campaign_id, sponsor_id, currency
+                    FROM subscription_campaign_allocations
+                ) all_contributions
                 GROUP BY all_contributions.campaign_id
                 HAVING COUNT(DISTINCT UPPER(all_contributions.currency)) > 1
                     AND EXISTS (
                         SELECT 1
-                        FROM contributions personal
+                        FROM (
+                            SELECT campaign_id, sponsor_id, status
+                            FROM contributions
+                            WHERE campaign_id IS NOT NULL AND status = 'CONFIRMED'
+                            UNION ALL
+                            SELECT campaign_id, sponsor_id, 'CONFIRMED' AS status
+                            FROM subscription_campaign_allocations
+                        ) personal
                         WHERE personal.campaign_id = all_contributions.campaign_id
                             AND personal.sponsor_id = :sponsorId
                             AND personal.status = 'CONFIRMED'
@@ -112,13 +140,26 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
     @Query(value = """
             SELECT CAST(campaign.id AS VARCHAR(36)) AS "campaignId",
                    campaign.title AS "title",
-                   UPPER(contribution.currency) AS "currency"
+                     UPPER(contribution.currency) AS "currency"
             FROM campaigns campaign
-            JOIN contributions contribution ON contribution.campaign_id = campaign.id
-            WHERE contribution.status = 'CONFIRMED'
+              JOIN (
+                  SELECT campaign_id, sponsor_id, currency
+                  FROM contributions
+                  WHERE campaign_id IS NOT NULL AND status = 'CONFIRMED'
+                  UNION ALL
+                  SELECT campaign_id, sponsor_id, currency
+                  FROM subscription_campaign_allocations
+              ) contribution ON contribution.campaign_id = campaign.id
               AND EXISTS (
                   SELECT 1
-                  FROM contributions personal
+                  FROM (
+                      SELECT campaign_id, sponsor_id, status
+                      FROM contributions
+                      WHERE campaign_id IS NOT NULL AND status = 'CONFIRMED'
+                      UNION ALL
+                      SELECT campaign_id, sponsor_id, 'CONFIRMED' AS status
+                      FROM subscription_campaign_allocations
+                  ) personal
                   WHERE personal.campaign_id = campaign.id
                     AND personal.sponsor_id = :sponsorId
                     AND personal.status = 'CONFIRMED'
@@ -142,6 +183,10 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
     Long countDistinctSponsorByCampaignIdAndStatus(@Param("campaignId") UUID campaignId, @Param("status") ContributionStatus status);
     @Query("select count(distinct c.sponsorId) from Contribution c where c.campaign.id = :campaignId and c.status in :statuses")
     Long countDistinctSponsorByCampaignIdAndStatuses(@Param("campaignId") UUID campaignId, @Param("statuses") List<ContributionStatus> statuses);
+    @Query("select distinct c.sponsorId from Contribution c where c.campaign.id = :campaignId and c.status in :statuses")
+    List<UUID> findDistinctSponsorIdsByCampaignIdAndStatuses(
+            @Param("campaignId") UUID campaignId,
+            @Param("statuses") List<ContributionStatus> statuses);
     @Query("select distinct c.sponsorId from Contribution c where c.campaign.id = :campaignId and c.status = :status and c.sponsorId <> :creatorId")
     List<UUID> findDistinctSponsorIdsByCampaignIdAndStatusExcludingCreator(
             @Param("campaignId") UUID campaignId,

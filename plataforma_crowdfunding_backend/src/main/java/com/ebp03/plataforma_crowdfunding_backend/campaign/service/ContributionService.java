@@ -29,6 +29,7 @@ public class ContributionService {
     private final CampaignRepository campaigns;
     private final CampaignRewardRepository rewards;
     private final ContributionRepository contributions;
+    private final SubscriptionCampaignAllocationRepository subscriptionAllocations;
     private final PaymentRepository payments;
     private final PaymentEventRepository events;
     private final PaymentProvider paymentProvider;
@@ -40,13 +41,15 @@ public class ContributionService {
 
     public ContributionService(CampaignRepository campaigns, CampaignRewardRepository rewards,
                                ContributionRepository contributions,
+                               SubscriptionCampaignAllocationRepository subscriptionAllocations,
                                PaymentRepository payments, PaymentEventRepository events,
                                PaymentProvider paymentProvider, PaymentWebhookAdapter webhookAdapter,
                                TransactionReceiptRepository receipts,
                                NotificationPublisher notificationPublisher,
                                @Value("${app.payment.platform-fee-rate:0.05}") BigDecimal feeRate,
                                @Value("${app.payment.webhook-secret:development-webhook-secret}") String webhookSecret) {
-        this.campaigns = campaigns; this.rewards = rewards; this.contributions = contributions; this.payments = payments;
+        this.campaigns = campaigns; this.rewards = rewards; this.contributions = contributions;
+        this.subscriptionAllocations = subscriptionAllocations; this.payments = payments;
         this.events = events; this.paymentProvider = paymentProvider; this.webhookAdapter = webhookAdapter;
         this.receipts = receipts; this.notificationPublisher = notificationPublisher;
         this.feeRate = feeRate; this.webhookSecret = webhookSecret;
@@ -370,9 +373,14 @@ public class ContributionService {
                     java.util.List.of(ContributionStatus.CONFIRMED, ContributionStatus.HELD),
                     campaign.getCurrency());
         } else {
-            raised = contributions.sumAmountByCampaignIdAndStatus(campaign.getId(), ContributionStatus.CONFIRMED);
+            raised = contributions.sumAmountByCampaignIdStatusesAndCurrency(
+                    campaign.getId(),
+                    java.util.List.of(ContributionStatus.CONFIRMED),
+                    campaign.getCurrency());
         }
         if (raised == null) raised = BigDecimal.ZERO;
+        raised = raised.add(subscriptionAllocations.sumAmountByCampaignIdAndCurrency(
+                campaign.getId(), campaign.getCurrency()));
         BigDecimal remaining = campaign.getGoalAmount().subtract(raised).max(BigDecimal.ZERO);
         if (amount.compareTo(remaining) > 0)
             throw new ContributionCapacityException();
