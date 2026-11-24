@@ -18,6 +18,7 @@ import com.ebp03.plataforma_crowdfunding_backend.campaign.domain.DraftReward;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.api.StrictIntegerDeserializer;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignDraftRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignRepository;
+import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignSponsorRankingProjection;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.CampaignUpdateRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.ContributionRepository;
 import com.ebp03.plataforma_crowdfunding_backend.campaign.repository.SubscriptionCampaignAllocationRepository;
@@ -396,11 +397,20 @@ public class CampaignService {
                 campaign.getUpdatedAt(),
                 rewardResponses(campaign),
                 updateResponses(campaign),
-                progress(campaign)
+                progress(campaign),
+                topSponsors(campaign.getId())
         );
     }
 
+    private List<CampaignSponsorRankingResponse> topSponsors(UUID campaignId) {
+        return contributionRepository.findTopSponsorsByCampaignId(campaignId).stream()
+                .map(sponsor -> new CampaignSponsorRankingResponse(
+                        UUID.fromString(sponsor.getSponsorId()), sponsor.getSponsorName(), sponsor.getTotalAmount()))
+                .toList();
+    }
+
     private CampaignSummaryResponse campaignSummary(Campaign campaign) {
+        User creator = userRepository.findById(campaign.getCreatorId()).orElse(null);
         return new CampaignSummaryResponse(
                 campaign.getId(),
                 campaign.getTitle(),
@@ -415,7 +425,8 @@ public class CampaignService {
                 campaign.getFundingModel(),
                 campaign.getStatus(),
                 campaign.getPublishedAt(),
-                progress(campaign)
+                progress(campaign),
+                creator == null ? null : new CampaignCreatorSummary(creator.getId(), creator.getName())
         );
     }
 
@@ -765,7 +776,10 @@ public class CampaignService {
                                          FundingModel fundingModel,
                                          CampaignStatus status,
                                          Instant publishedAt,
-                                         CampaignProgress progress) { }
+                                         CampaignProgress progress,
+                                         CampaignCreatorSummary creator) { }
+
+    public record CampaignCreatorSummary(UUID id, String name) { }
 
     public record CampaignDetailResponse(UUID id,
                                         PublicUser creator,
@@ -785,7 +799,10 @@ public class CampaignService {
                                         Instant updatedAt,
                                         List<RewardResponse> rewards,
                                         List<CampaignUpdateResponse> updates,
-                                        CampaignProgress progress) { }
+                                        CampaignProgress progress,
+                                        List<CampaignSponsorRankingResponse> topSponsors) { }
+
+    public record CampaignSponsorRankingResponse(UUID sponsorId, String sponsorName, BigDecimal totalAmount) { }
 
     public record CampaignUpdateResponse(UUID id, UUID campaignId, UUID authorId, String title, String body, Instant publishedAt) {
         static CampaignUpdateResponse from(CampaignUpdate update) {

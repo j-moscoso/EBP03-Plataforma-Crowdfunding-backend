@@ -716,6 +716,10 @@ Respuesta `200`:
       "mediaUrl": "https://example.com/media/bosques.jpg",
       "status": "ACTIVE",
       "publishedAt": "2026-01-01T00:00:00Z",
+      "creator": {
+        "id": "UUID",
+        "name": "Creador"
+      },
       "progress": {
         "raisedAmount": 13500,
         "remainingAmount": 16500,
@@ -737,6 +741,12 @@ Respuesta `200`:
 `GET /api/campaigns/{campaignId}`
 
 Respuesta pública `200` con detalle completo de la campaña.
+Incluye `topSponsors`, una lista de hasta cinco patrocinadores ordenada por la suma
+descendente de sus aportes públicos `CONFIRMED` y `HELD` (estos últimos mientras
+están retenidos en campañas fijas) y las asignaciones de suscripciones a la campaña.
+Se omiten los aportes solicitados como anónimos, así como los aportes pendientes,
+fallidos y reembolsados. Cada elemento contiene `sponsorId`, `sponsorName` y
+`totalAmount`; una campaña sin aportes visibles devuelve `[]`.
 
 ### 9) Crear actualización de campaña
 

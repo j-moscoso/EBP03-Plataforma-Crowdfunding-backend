@@ -170,6 +170,29 @@ public interface ContributionRepository extends JpaRepository<Contribution, UUID
     List<SupportedCampaignCurrencyProjection> findSupportedCampaignCurrencies(
             @Param("sponsorId") UUID sponsorId);
 
+    @Query(value = """
+            SELECT CAST(ranking.sponsor_id AS VARCHAR(36)) AS "sponsorId",
+                   sponsor.name AS "sponsorName",
+                   SUM(ranking.amount) AS "totalAmount"
+            FROM (
+                SELECT sponsor_id, amount
+                FROM contributions
+                WHERE campaign_id = :campaignId
+                    AND status IN ('CONFIRMED', 'HELD')
+                    AND is_anonymous = FALSE
+                UNION ALL
+                SELECT sponsor_id, amount
+                FROM subscription_campaign_allocations
+                WHERE campaign_id = :campaignId
+            ) ranking
+            JOIN users sponsor ON sponsor.id = ranking.sponsor_id
+            GROUP BY ranking.sponsor_id, sponsor.name
+            ORDER BY SUM(ranking.amount) DESC, sponsor.name ASC, ranking.sponsor_id ASC
+            LIMIT 5
+            """, nativeQuery = true)
+    List<CampaignSponsorRankingProjection> findTopSponsorsByCampaignId(
+            @Param("campaignId") UUID campaignId);
+
     @Query("""
             select case when count(c) > 0 then true else false end
             from Contribution c

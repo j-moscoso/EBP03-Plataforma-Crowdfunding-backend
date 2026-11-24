@@ -216,7 +216,63 @@ class CampaignControllerIntegrationTests {
                 .andExpect(jsonPath("$.progress.raisedAmount").value(13500.0))
                 .andExpect(jsonPath("$.progress.remainingAmount").value(16500.0))
                 .andExpect(jsonPath("$.progress.sponsorsCount").value(1))
+                .andExpect(jsonPath("$.topSponsors[0].sponsorName").value("Sponsor de prueba"))
+                .andExpect(jsonPath("$.topSponsors[0].totalAmount").value(13500.0))
                 .andExpect(jsonPath("$.progress.secondsRemaining").exists());
+    }
+
+    @Test
+    void campaignDetailRanksTopFivePublicSponsorTotals() throws Exception {
+        User creator = saveCreator("creator.ranking@test.local");
+        Campaign campaign = campaignRepository.save(new Campaign(creator.getId(), "Ranking", "Prueba",
+                new BigDecimal("1000.00"), Instant.now().plusSeconds(86400), "Tecnología", null, "USD",
+                CampaignStatus.ACTIVE));
+
+        User sponsorA = saveSponsor("Patrocinador A", "sponsor.ranking.a@test.local");
+        User sponsorB = saveSponsor("Patrocinador B", "sponsor.ranking.b@test.local");
+        User sponsorC = saveSponsor("Patrocinador C", "sponsor.ranking.c@test.local");
+        User sponsorD = saveSponsor("Patrocinador D", "sponsor.ranking.d@test.local");
+        User sponsorE = saveSponsor("Patrocinador E", "sponsor.ranking.e@test.local");
+        User sponsorF = saveSponsor("Patrocinador F", "sponsor.ranking.f@test.local");
+        User sponsorG = saveSponsor("Patrocinador G", "sponsor.ranking.g@test.local");
+        User anonymousOnlySponsor = saveSponsor("No mostrar", "sponsor.ranking.anonymous@test.local");
+        User pendingSponsor = saveSponsor("Pendiente", "sponsor.ranking.pending@test.local");
+
+        contributionRepository.save(new Contribution(campaign, sponsorA.getId(), new BigDecimal("100.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorA.getId(), new BigDecimal("40.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorA.getId(), null, new BigDecimal("500.00"),
+                "USD", ContributionStatus.CONFIRMED, "anonymous-ranking", true));
+        contributionRepository.save(new Contribution(campaign, sponsorB.getId(), new BigDecimal("200.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorB.getId(), new BigDecimal("20.00"),
+                "USD", ContributionStatus.HELD));
+        contributionRepository.save(new Contribution(campaign, sponsorC.getId(), new BigDecimal("80.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorD.getId(), new BigDecimal("70.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorE.getId(), new BigDecimal("60.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorF.getId(), new BigDecimal("50.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, sponsorG.getId(), new BigDecimal("40.00"),
+                "USD", ContributionStatus.CONFIRMED));
+        contributionRepository.save(new Contribution(campaign, anonymousOnlySponsor.getId(), null,
+                new BigDecimal("900.00"), "USD", ContributionStatus.CONFIRMED, "anonymous-only-ranking", true));
+        contributionRepository.save(new Contribution(campaign, pendingSponsor.getId(), new BigDecimal("1000.00"),
+                "USD", ContributionStatus.PENDING));
+
+        mockMvc.perform(get("/api/campaigns/{campaignId}", campaign.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.topSponsors.length()").value(5))
+                .andExpect(jsonPath("$.topSponsors[0].sponsorName").value("Patrocinador B"))
+                .andExpect(jsonPath("$.topSponsors[0].totalAmount").value(220.0))
+                .andExpect(jsonPath("$.topSponsors[1].sponsorName").value("Patrocinador A"))
+                .andExpect(jsonPath("$.topSponsors[1].totalAmount").value(140.0))
+                .andExpect(jsonPath("$.topSponsors[2].sponsorName").value("Patrocinador C"))
+                .andExpect(jsonPath("$.topSponsors[3].sponsorName").value("Patrocinador D"))
+                .andExpect(jsonPath("$.topSponsors[4].sponsorName").value("Patrocinador E"));
     }
 
     @Test
@@ -301,7 +357,8 @@ class CampaignControllerIntegrationTests {
         mockMvc.perform(get("/api/campaigns/mine").cookie(creatorB))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.content[0].title").value("Campaña B"));
+                .andExpect(jsonPath("$.content[0].title").value("Campaña B"))
+                .andExpect(jsonPath("$.content[0].creator.name").value("Creator"));
         mockMvc.perform(get("/api/campaigns/mine")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/campaigns/mine").cookie(registerSponsor("sponsor.mine@test.local")))
                 .andExpect(status().isForbidden());
@@ -720,6 +777,12 @@ class CampaignControllerIntegrationTests {
 
             private User saveCreator(String email) {
                 return userRepository.save(new User("Creator", email, "hashed", UserRole.CREATOR, VerificationStatus.VERIFIED,
+                        com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus.ACTIVE));
+            }
+
+            private User saveSponsor(String name, String email) {
+                return userRepository.save(new User(name, email, "hashed", UserRole.SPONSOR,
+                        VerificationStatus.VERIFIED,
                         com.ebp03.plataforma_crowdfunding_backend.auth.domain.AccountStatus.ACTIVE));
             }
 
